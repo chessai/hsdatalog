@@ -22,31 +22,56 @@ build-type:
 --extra-source-files:
 --  CHANGELOG.md
 
-library
-  hs-source-dirs:
-    src
-  exposed-modules:
-    Datalog
-    Datalog.Cudd
-    Datalog.Syntax
+common shared-properties
+  default-language:
+    Haskell2010
   build-depends:
     , base
-    , cudd
     , containers
---    , disjoint-sets
     , extra
     , generic-lens >= 2.0.0.0
---    , generic-lens-core
---    , hashable
     , ilist
     , lens
-    , megaparsec
     , mtl
-    , parser-combinators
     , primitive
     , safe
     , text
     , transformers
     , vector
-  default-language:
-    Haskell2010
+
+library
+  import:
+    shared-properties
+  hs-source-dirs:
+    src
+  exposed-modules:
+    Datalog
+    Datalog.Cudd
+    Datalog.CycleEnumeration
+    Datalog.Syntax
+  build-depends:
+    , cudd
+    , hmatrix
+    , megaparsec
+    , parser-combinators
+    , MonadRandom
+    , vector-circular
+
+test-suite test
+  import:
+    shared-properties
+  type:
+    exitcode-stdio-1.0
+  hs-source-dirs:
+    test
+  main-is:
+    Main.hs
+  other-modules:
+    Test.CycleEnumeration
+  build-depends:
+    , hedgehog
+    , hsdatalog
+    , tasty
+    , tasty-hedgehog
+    , tasty-hunit
+

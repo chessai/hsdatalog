@@ -211,5 +211,3 @@ largestCube = reader1 PureCudd.largestCube
 
 lEq :: (Monad m) => DDNode -> DDNode -> CuddT m Bool
 lEq = reader2 PureCudd.lEq
-
-

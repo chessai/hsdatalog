@@ -13,6 +13,8 @@ with {
       haskellPackages = super.haskell.packages."${compiler}".override {
         overrides = hself: hsuper: with super.haskell.lib; rec {
           cudd = unmarkBroken (hsuper.cudd.override { cudd = self.cudd; });
+          vector-circular = hself.callPackage ./vector-circular.nix {};
+          hedgehog-classes = doJailbreak (unmarkBroken hsuper.hedgehog-classes);
         };
       };
     };

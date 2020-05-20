@@ -4,16 +4,16 @@ match =
 configure:
 	cabal configure
 
-build:
+build: configure
 	cabal build
 
-test:
+test: configure
 	cabal test
 
 clean:
 	cabal clean
 
-ghci:
+ghci: configure
 	cabal repl lib:hsdatalog
 
 ghcid: configure
@@ -22,5 +22,8 @@ ifeq ($(match),)
 else
 	ghcid -c "cabal repl" --allow-eval --warnings --test $(match)
 endif
+
+ghcid-test-suite: build
+	ghcid -c "cabal repl lib:hsdatalog test:test" --allow-eval --warnings
 
 .PHONY : configure build test clean ghci ghcid
