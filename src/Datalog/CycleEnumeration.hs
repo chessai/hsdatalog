@@ -1,177 +1,235 @@
-{-# language ScopedTypeVariables #-}
-{-# language TupleSections #-}
-{-# language TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TypeApplications    #-}
 
 module Datalog.CycleEnumeration
   ( Graph
-  , enumerateGraph
-  , inducedSubgraph
+  , newGraph
+  , numEdges
+  , vertices
+  , neighbors
+  , addVertex
+  , addEdge
+  , removeVertex
+  , sccGraph
+  , sccListGraph
+
+  , enumerateCycles
   , randomGraph
-  , graphToDot
-  , scc
   ) where
 
-import Control.Monad
-import Control.Monad.Primitive
-import Control.Monad.ST (ST, runST)
-import Control.Monad.ST.Unsafe (unsafeIOToST)
-import Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
-import Control.Monad.Random.Strict (evalRandIO)
-import Control.Monad.Random.Class (MonadRandom, getRandom)
-import Data.Bifunctor (first)
-import Data.Foldable (toList)
-import Data.List.Index (imap, iconcatMap, iforM_)
-import Data.Graph (Forest, Tree, buildG)
-import Data.Map.Strict (Map)
-import Data.Maybe
-import Data.Primitive.MutVar
-import Data.Set (Set)
-import Data.Vector.Mutable (MVector)
-import qualified Control.Monad.Random.Class as MonadRandom
-import qualified Data.Graph as Containers
-import qualified Data.List as List
-import qualified Data.List.Extra as Extra
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
-import qualified Data.Vector as Vector
-import qualified Data.Vector.Mutable as MVector
+import           Control.Monad
+import           Control.Monad.Extra
+import           Control.Monad.Primitive
+import           Control.Monad.Random.Class     (MonadRandom, getRandom)
+import qualified Control.Monad.Random.Class     as MonadRandom
+import           Control.Monad.Random.Strict    (evalRandIO)
+import           Control.Monad.ST               (ST, runST)
+import           Control.Monad.ST.Unsafe        (unsafeIOToST)
+import           Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
+import           Data.Bifunctor                 (first, second)
+import           Data.Foldable                  (toList, traverse_)
+import           Data.Graph                     (Forest, Tree, buildG)
+import qualified Data.Graph                     as Containers
+import qualified Data.List                      as List
+import qualified Data.List.Extra                as Extra
+import           Data.List.Index                (iconcatMap, iforM_, imap)
+import           Data.Map.Strict                (Map)
+import qualified Data.Map.Strict                as Map
+import           Data.Maybe
+import           Data.Monoid                    (Sum (..))
+import           Data.Primitive.MutVar
+import           Data.Set                       (Set)
+import qualified Data.Set                       as Set
+import qualified Data.Vector                    as Vector
+import           Data.Vector.Mutable            (MVector)
+import qualified Data.Vector.Mutable            as MVector
 
-data Graph node weight = Graph
-  { nodes :: [[(Int, weight)]]
-  , toNode :: Map Int node
-  , fromNode :: Map node Int
-  }
+newtype Graph node weight
+  = Graph
+    { fromGraph :: Map node (Map node weight)
+    }
 
-emptyGraph :: Graph node weight
-emptyGraph = Graph [] Map.empty Map.empty
+newGraph :: (Ord node) => Graph node weight
+newGraph = Graph mempty
 
-index :: Int -> Graph node weight -> [(Int, weight)]
-index v g = nodes g !! v
+numEdges :: Graph node weight -> Int
+numEdges = getSum . foldMap (Sum . Map.size) . fromGraph
 
-hasEdges :: Graph node weight -> Bool
-hasEdges = any (not . null) . nodes
+vertices :: Graph node weight -> [node]
+vertices = Map.keys . fromGraph
 
-vertices :: Graph node weight -> [Int]
-vertices g = [0 .. length (nodes g) - 1]
+neighbors :: (Ord node) => Graph node weight -> node -> [(node, weight)]
+neighbors graph node = Map.toList $ Map.findWithDefault mempty node (fromGraph graph)
 
-leastVertex :: [Int] -> Int
-leastVertex = minimum
+addVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
+addVertex node = Graph . Map.insert node mempty . fromGraph
 
-scc :: Graph node weight -> [[Int]]
-scc = map toList . Containers.scc . graphToBadGraph . nodes
+addEdge :: (Ord node, Eq weight) => node -> node -> weight -> Graph node weight -> Graph node weight
+addEdge source target weight =
+  Graph . Map.insertWith Map.union source (Map.singleton target weight) . fromGraph
+
+removeVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
+removeVertex node = Graph . fmap (Map.delete node) . Map.delete node . fromGraph
+
+mapVertices
+  :: (Ord node, Ord node')
+  => (node -> node') -- ^ Must be a bijection!
+  -> Graph node weight
+  -> Graph node' weight
+mapVertices f = Graph . Map.map (Map.mapKeys f) . Map.mapKeys f . fromGraph
+
+sccGraph :: forall node weight. (Ord node) => Graph node weight -> Map node Int
+sccGraph graph = Map.fromList (concatMap (\(i, ns) -> map (,i) ns) (zip [0..] scc))
   where
-    graphToBadGraph :: [[(Int, weight)]] -> Containers.Graph
-    graphToBadGraph graph = buildG (0, length graph - 1) (concatMap go (zip [0..] graph))
-      where
-        go :: (Int, [(Int, weight)]) -> [Containers.Edge]
-        go (src, targets) = map ((src,) . fst) targets
+    scc :: [[node]]
+    scc = sccListGraph graph
 
-inducedSubgraph :: forall node weight. (Ord node) => Set node -> Graph node weight -> Graph node weight
-inducedSubgraph ss graph = undefined
-{-
-  renameStep (map (filter (flip Set.member ss . fst) . ((nodes graph) !!)) ssList)
+sccListGraph :: forall node weight. (Ord node) => Graph node weight -> [[node]]
+sccListGraph (Graph graph) =
+  map (map (intToVertices Map.!) . toList)
+  $ Containers.scc
+  $ Containers.buildG bounds
+  $ concatMap (\(i, js) -> map (\(j, _) -> (i, j)) (Map.toList js))
+  $ Map.toList
+  $ fromGraph
+  $ mapVertices (verticesToInt Map.!) (Graph graph)
   where
-    ssList = Set.toAscList ss
+    bounds :: Containers.Bounds
+    bounds = (0, Map.size graph - 1)
 
-    renames :: Map Int Int
-    renames = Map.fromList (zip ssList [0..])
+    verticesToInt :: Map node Int
+    verticesToInt =
+      Map.fromList $ zipWith (\(n, _) i -> (n, i)) (Map.toAscList graph) [0..]
 
-    renameStep :: Graph node weight -> Graph node weight
-    renameStep g = map (map (first specialLookup)) g
+    intToVertices :: Map Int node
+    intToVertices =
+      Map.fromList $ zipWith (\i (n, _) -> (i, n)) [0..] (Map.toAscList graph)
 
-    specialLookup :: Int -> Int
-    specialLookup x = Map.findWithDefault (error ("not in map: " ++ show x)) x renames
--}
+newtype Table s k v = Table (MutVar s (Map k v))
+
+newTable :: (PrimMonad m, Ord k) => m (Table (PrimState m) k v)
+newTable = Table <$> newMutVar mempty
+
+insertTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> v -> m ()
+insertTable (Table t) k v = modifyMutVar' t (Map.insert k v)
+
+lookupTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> m (Maybe v)
+lookupTable (Table t) k = Map.lookup k <$> readMutVar t
+
+findWithDefaultTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> v -> k -> m v
+findWithDefaultTable (Table t) def k = Map.findWithDefault def k <$> readMutVar t
+
+deleteTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> m ()
+deleteTable (Table t) k = modifyMutVar' t (Map.delete k)
+
+modifyTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> (v -> v) -> m ()
+modifyTable (Table t) k f = modifyMutVar' t (Map.adjust f k)
 
 -- | Compute the cycles in a 'WeightedGraph'
 --
 --   implements <https://www.cs.tufts.edu/comp/150GA/homeworks/hw1/Johnson%2075.PDF Johnson's Algorithm>
-enumerateGraph :: forall node weight. (Ord node, Show weight) => Graph node weight -> [[node]]
-enumerateGraph graph = runST $ execWriterT enumerate
+enumerateCycles :: forall node. (Ord node) => Graph node () -> [[node]]
+enumerateCycles graph = runST impl
   where
-    enumerate :: forall s. WriterT [[node]] (ST s) ()
-    enumerate = do
-      let n = length graph
-      _A <- newMutVar @_ @(Graph node weight) emptyGraph
-      _B <- MVector.replicate @_ @(Set Int) n Set.empty
-      blocked <- MVector.replicate @_ @Bool n False
-      sVar <- newMutVar @_ @Int 0
-      stackVar <- newMutVar @_ @[node] []
-      let push x = modifyMutVar' stackVar (x :)
-      let pop = modifyMutVar' stackVar tail
+    impl :: forall s. ST s [[node]]
+    impl = do
+      pathVar    <- newMutVar @_ @[node] []
+      blockedVar <- newTable  @_ @node @Bool
+      bVar       <- newTable  @_ @node @[node]
+      resultVar  <- newMutVar @_ @[[node]] []
 
-      let unblock :: Int -> WriterT [[node]] (ST s) ()
-          unblock u = do
-            MVector.write blocked u False
-            bu <- MVector.read _B u
-            forM_ bu $ \w -> do
-              MVector.modify _B (Set.delete w) u
-              bw <- MVector.read blocked w
-              when bw (unblock w)
+      let getBlocked :: node -> ST s Bool
+          getBlocked = findWithDefaultTable blockedVar False
+          setBlocked :: node -> Bool -> ST s ()
+          setBlocked = insertTable blockedVar
 
-      let circuit :: Int -> WriterT [[node]] (ST s) Bool
-          circuit v = do
-            fVar <- newMutVar @_ @Bool False
-            push v
-            MVector.write blocked v True
-            a <- (index v) <$> readMutVar _A
-            forM_ a $ \(w, _) -> do
-              s <- readMutVar sVar
-              printST $ "w == " ++ show w
-              printST $ "s == " ++ show s
-              if w == s
-                then do
-                  cycle <- snoc <$> readMutVar stackVar <*> readMutVar sVar
-                  tell [cycle]
-                  writeMutVar fVar True
-                else do
-                  bw <- MVector.read blocked w
-                  unless bw $ do
-                    cw <- circuit w
-                    when cw (writeMutVar fVar True)
-            readMutVar fVar >>= \f -> if f
+      let getB :: node -> ST s [node]
+          getB = findWithDefaultTable bVar []
+          setB :: node -> [node] -> ST s ()
+          setB = insertTable bVar
+
+      let push :: node -> ST s ()
+          push n = modifyMutVar' pathVar (n:)
+          pop :: ST s ()
+          pop = modifyMutVar' pathVar tail
+
+      let unblock :: node -> ST s ()
+          unblock n = do
+            b <- getBlocked n
+            when b $ do
+              setBlocked n False
+              getB n >>= traverse_ unblock
+              setB n []
+
+      let circuit :: node -> node -> Graph node () -> ST s Bool
+          circuit thisNode startNode component = do
+            closedVar <- newMutVar False
+            push thisNode
+            setBlocked thisNode True
+            forM_ (neighbors component thisNode) $ \(nextNode, _) -> do
+              if nextNode == startNode
+                then do path <- readMutVar pathVar
+                        modifyMutVar' resultVar (path:)
+                        writeMutVar closedVar True
+                else do unlessM (getBlocked nextNode) $ do
+                          whenM (circuit nextNode startNode component) $ do
+                            writeMutVar closedVar True
+            closed <- readMutVar closedVar
+            if closed
               then do
-                unblock v
+                forM_ (neighbors component thisNode) $ \(nextNode, _) -> do
+                  l <- getB nextNode
+                  unless (thisNode `elem` l) $ do
+                    setB nextNode (thisNode : l)
               else do
-                forM_ a $ \(w, _) -> do
-                  bw <- MVector.read _B w
-                  unless (v `Set.member` bw) $ do
-                    MVector.modify _B (Set.insert v) w
+                unblock thisNode
             pop
-            readMutVar fVar
+            pure (not closed)
 
-      let go :: WriterT [[node]] (ST s) ()
-          go = do
-            p <- readMutVar sVar >>= \s -> pure (s < n - 1)
-            when p $ do
-              _Ak <- do
-                s <- readMutVar sVar
-                -- The adjacency structure of strong component K with least
-                -- vertex in subgraph of G induced by {s, s + 1, ..., n}
-                let _Ak = id
-                      $ flip inducedSubgraph graph
-                      $ Set.fromList
-                      $ fromMaybe (error "_Ak find failed")
-                      $ List.find (s `elem`)
-                      $ scc
-                      $ inducedSubgraph (Set.fromList [s..n-1]) graph
-                writeMutVar _A _Ak
-                printST $ "_Ak = " ++ show _Ak
-                pure _Ak
-              let _Vk = vertices _Ak
-              printST $ "hasEdges _Ak = " ++ show (hasEdges _Ak)
-              if hasEdges _Ak
-                then do
-                  writeMutVar sVar (leastVertex _Vk)
-                  forM_ _Vk $ \i -> do
-                    MVector.write blocked i False
-                    MVector.write _B i Set.empty
-                  printST "Executing circuit"
-                  readMutVar sVar >>= \s -> void (circuit s)
-                  modifyMutVar' sVar (+1)
-                else do
-                  writeMutVar sVar n
-      go
+      let extractSubgraph :: [node] -> Graph node () -> Graph node ()
+          extractSubgraph s g = runST $ do
+            sgVar <- newMutVar newGraph
+            forM_ s $ \v1 -> do
+              modifyMutVar' sgVar (addVertex v1)
+              forM_ (neighbors g v1) $ \(v2, _) -> do
+                when (v2 `elem` s) $ do
+                  modifyMutVar' sgVar (addEdge v1 v2 ())
+            readMutVar sgVar
+
+      let sccWithVertex :: node -> Graph node () -> Graph node ()
+          sccWithVertex v g = runST $ do
+            let scc = sccGraph g
+            let n = scc Map.! v
+            sgVar <- newMutVar newGraph
+            forM_ (vertices g) $ \v1 -> do
+              when (scc Map.! v1 == n) $ do
+                forM_ (neighbors g v1) $ \(v2, _) -> do
+                  when (scc Map.! v2 == n) $ do
+                    modifyMutVar' sgVar (addEdge v1 v2 ())
+            readMutVar sgVar
+
+      let nonDegenerateSCC :: [[node]]
+          nonDegenerateSCC = filter (\s -> length s > 1) (sccListGraph graph)
+
+      let nonDegenerateSubgraphs :: [Graph node ()]
+          nonDegenerateSubgraphs = map (`extractSubgraph` graph) (List.sort nonDegenerateSCC)
+
+      forM_ nonDegenerateSubgraphs $ \subgraph -> do
+        let go :: Graph node () -> [node] -> ST s ()
+            go _ [] = pure ()
+            go g (s:rest) = do
+              let component = sccWithVertex s g
+              when (numEdges component > 0) $ do
+                forM_ (vertices component) $ \node -> do
+                  setBlocked node False
+                  setB node []
+                void $ circuit s s component
+              go (removeVertex s g) rest
+
+        go subgraph (List.sort (vertices graph))
+
+      reverse <$> readMutVar resultVar
 
 snoc :: [a] -> a -> [a]
 snoc xs x = xs ++ [x]
@@ -189,18 +247,18 @@ randomGraph n frequencyOfOne = do
     flat <- replicateM (n ^ 2) (MonadRandom.fromList [(True, frequencyOfOne), (False, 1 - frequencyOfOne)])
     pure (Extra.chunksOf n flat)
 
-  mv <- MVector.replicate @_ @[(Int, ())] n []
+  graphVar <- newMutVar newGraph
 
   iforM_ m $ \i xs -> do
     iforM_ xs $ \j b -> do
       when b $ do
         when (i /= j) $ do
-          MVector.modify mv ((j, ()) :) i
+          modifyMutVar' graphVar (addEdge i j ())
 
-  Vector.toList <$> Vector.unsafeFreeze mv
+  readMutVar graphVar
 
-graphToDot :: Show node => Graph node weight -> String
-graphToDot graph = iconcatMap (\i xs -> unlines (map (\(j, _) -> show i ++ " " ++ show j) xs)) graph
+-- graphToDot :: Show node => Graph node weight -> String
+-- graphToDot graph = iconcatMap (\i xs -> unlines (map (\(j, _) -> show i ++ " " ++ show j) xs)) graph
 
 {-
   [ "digraph " ++ name ++ "{\n"
