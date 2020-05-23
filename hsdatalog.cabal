@@ -48,6 +48,8 @@ library
     Datalog
     Datalog.Cudd
     Datalog.CycleEnumeration
+    Datalog.Graph
+    Datalog.Stratification
     Datalog.Syntax
   build-depends:
     , cudd

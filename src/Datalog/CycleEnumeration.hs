@@ -3,24 +3,7 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeApplications    #-}
 
-module Datalog.CycleEnumeration
-  ( Graph
-  , newGraph
-  , numEdges
-  , vertices
-  , neighbors
-  , addVertex
-  , addEdge
-  , removeVertex
-  , sccGraph
-  , sccListGraph
-
-  , enumerateCycles
-  , randomGraph
-
-    -- * for testing
-  , test
-  ) where
+module Datalog.CycleEnumeration where
 
 import           Control.Exception              (assert)
 import           Control.Monad
@@ -50,73 +33,7 @@ import qualified Data.Vector                    as Vector
 import           Data.Vector.Mutable            (MVector)
 import qualified Data.Vector.Mutable            as MVector
 
-newtype Graph node weight
-  = Graph
-    { fromGraph :: Map node (Map node weight)
-    }
-  deriving (Show)
-
-newGraph :: (Ord node) => Graph node weight
-newGraph = Graph mempty
-
-numEdges :: Graph node weight -> Int
-numEdges = getSum . foldMap (Sum . Map.size) . fromGraph
-
-vertices :: Graph node weight -> [node]
-vertices = Map.keys . fromGraph
-
-neighbors :: (Ord node) => Graph node weight -> node -> [(node, weight)]
-neighbors graph node = Map.toList $ Map.findWithDefault mempty node (fromGraph graph)
-
-addVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
-addVertex node = Graph . Map.insert node mempty . fromGraph
-
-addEdge :: (Ord node, Eq weight) => node -> node -> weight -> Graph node weight -> Graph node weight
-addEdge source target weight =
-  Graph . Map.insertWith Map.union source (Map.singleton target weight) . fromGraph
-
-removeVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
-removeVertex node = Graph . fmap (Map.delete node) . Map.delete node . fromGraph
-
-mapWeight
-  :: (weight -> weight')
-  -> Graph node weight
-  -> Graph node weight'
-mapWeight f = Graph . fmap (fmap f) . fromGraph
-
-mapVertices
-  :: (Ord node, Ord node')
-  => (node -> node') -- ^ Must be a bijection!
-  -> Graph node weight
-  -> Graph node' weight
-mapVertices f = Graph . Map.map (Map.mapKeys f) . Map.mapKeys f . fromGraph
-
-sccGraph :: forall node weight. (Ord node) => Graph node weight -> Map node Int
-sccGraph graph = Map.fromList (concatMap (\(i, ns) -> map (,i) ns) (zip [0..] scc))
-  where
-    scc :: [[node]]
-    scc = sccListGraph graph
-
-sccListGraph :: forall node weight. (Ord node) => Graph node weight -> [[node]]
-sccListGraph (Graph graph) =
-  map (map (intToVertices Map.!) . toList)
-  $ Containers.scc
-  $ Containers.buildG bounds
-  $ concatMap (\(i, js) -> map (\(j, _) -> (i, j)) (Map.toList js))
-  $ Map.toList
-  $ fromGraph
-  $ mapVertices (verticesToInt Map.!) (Graph graph)
-  where
-    bounds :: Containers.Bounds
-    bounds = (0, Map.size graph - 1)
-
-    verticesToInt :: Map node Int
-    verticesToInt =
-      Map.fromList $ zipWith (\(n, _) i -> (n, i)) (Map.toAscList graph) [0..]
-
-    intToVertices :: Map Int node
-    intToVertices =
-      Map.fromList $ zipWith (\i (n, _) -> (i, n)) [0..] (Map.toAscList graph)
+import           Datalog.Graph
 
 newtype Table s k v = Table (MutVar s (Map k v))
 
@@ -243,82 +160,3 @@ enumerateCycles graph = runST impl
         go subgraph (List.sort (vertices subgraph))
 
       map reverse . reverse <$> readMutVar resultVar
-
-snoc :: [a] -> a -> [a]
-snoc xs x = xs ++ [x]
-
-dup :: a -> (a, a)
-dup a = (a, a)
-
-printST :: PrimMonad m => String -> m ()
-printST = unsafePrimToPrim . putStrLn
-{-# noinline printST #-}
-
-randomGraph :: Int -> Rational -> IO (Graph Int ())
-randomGraph n frequencyOfOne = do
-  m <- evalRandIO $ do
-    flat <- replicateM (n ^ 2) (MonadRandom.fromList [(True, frequencyOfOne), (False, 1 - frequencyOfOne)])
-    pure (Extra.chunksOf n flat)
-
-  graphVar <- newMutVar newGraph
-
-  iforM_ m $ \i xs -> do
-    iforM_ xs $ \j b -> do
-      when b $ do
-        when (i /= j) $ do
-          modifyMutVar' graphVar (addEdge i j ())
-
-  readMutVar graphVar
-
-graphA :: Graph Int ()
-graphA =
-  mapWeight (const ()) $
-  addEdge 0 2 "a" $
-  addEdge 0 3 "b" $
-  addEdge 1 2 "d" $
-  addEdge 1 4 "e" $
-  addEdge 2 0 "f" $
-  addEdge 2 4 "g" $
-  addEdge 3 1 "h" $
-  addEdge 3 4 "j" $
-  addVertex 0 $
-  addVertex 1 $
-  addVertex 2 $
-  addVertex 3 $
-  addVertex 4 $
-  newGraph
-
-evalOp :: Show a => a -> IO String
-evalOp x = do
-  let !y = show x
-  assert (length y == length y) (pure ())
-  pure y
-
-test :: IO ()
-test = do
-  g <- evalOp (enumerateCycles graphA)
-
-  putStrLn $ "\n\n" ++ g
-
--- graphToDot :: Show node => Graph node weight -> String
--- graphToDot graph = iconcatMap (\i xs -> unlines (map (\(j, _) -> show i ++ " " ++ show j) xs)) graph
-
-{-
-  [ "digraph " ++ name ++ "{\n"
-  , goVertices graph
-  , goEdges graph
-  , "}"
-  ]
-  where
-    goVertices :: Graph weight -> String
-    goVertices g = concatMap (indent 2 . (++ ";\n") . show) [0 .. length g - 1]
-
-    goEdges :: Graph weight -> String
-    goEdges = iconcatMap $ \i xs ->
-
-    single :: Int -> (Int, weight) -> String
-    single l (r, _) = indent 2 (show l ++ " -> " ++ show r ++ ";\n")
-
-    indent :: Int -> String -> String
-    indent n s = replicate n ' ' ++ s
--}
