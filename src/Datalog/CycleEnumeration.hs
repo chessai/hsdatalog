@@ -227,7 +227,7 @@ enumerateCycles graph = runST impl
                 void $ circuit s s component
               go (removeVertex s g) rest
 
-        go subgraph (List.sort (vertices graph))
+        go subgraph (List.sort (vertices subgraph))
 
       reverse <$> readMutVar resultVar
 
