@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -16,8 +17,12 @@ module Datalog.CycleEnumeration
 
   , enumerateCycles
   , randomGraph
+
+    -- * for testing
+  , test
   ) where
 
+import           Control.Exception              (assert)
 import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Primitive
@@ -49,6 +54,7 @@ newtype Graph node weight
   = Graph
     { fromGraph :: Map node (Map node weight)
     }
+  deriving (Show)
 
 newGraph :: (Ord node) => Graph node weight
 newGraph = Graph mempty
@@ -71,6 +77,12 @@ addEdge source target weight =
 
 removeVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
 removeVertex node = Graph . fmap (Map.delete node) . Map.delete node . fromGraph
+
+mapWeight
+  :: (weight -> weight')
+  -> Graph node weight
+  -> Graph node weight'
+mapWeight f = Graph . fmap (fmap f) . fromGraph
 
 mapVertices
   :: (Ord node, Ord node')
@@ -129,7 +141,7 @@ modifyTable (Table t) k f = modifyMutVar' t (Map.adjust f k)
 -- | Compute the cycles in a 'WeightedGraph'
 --
 --   implements <https://www.cs.tufts.edu/comp/150GA/homeworks/hw1/Johnson%2075.PDF Johnson's Algorithm>
-enumerateCycles :: forall node. (Ord node) => Graph node () -> [[node]]
+enumerateCycles :: forall node. (Ord node, Show node) => Graph node () -> [[node]]
 enumerateCycles graph = runST impl
   where
     impl :: forall s. ST s [[node]]
@@ -167,7 +179,8 @@ enumerateCycles graph = runST impl
             closedVar <- newMutVar False
             push thisNode
             setBlocked thisNode True
-            forM_ (neighbors component thisNode) $ \(nextNode, _) -> do
+            let neighbors_ = neighbors component thisNode
+            forM_ neighbors_ $ \(nextNode, _) -> do
               if nextNode == startNode
                 then do path <- readMutVar pathVar
                         modifyMutVar' resultVar (path:)
@@ -178,14 +191,14 @@ enumerateCycles graph = runST impl
             closed <- readMutVar closedVar
             if closed
               then do
-                forM_ (neighbors component thisNode) $ \(nextNode, _) -> do
+                unblock thisNode
+              else do
+                forM_ neighbors_ $ \(nextNode, _) -> do
                   l <- getB nextNode
                   unless (thisNode `elem` l) $ do
                     setB nextNode (thisNode : l)
-              else do
-                unblock thisNode
             pop
-            pure (not closed)
+            pure closed
 
       let extractSubgraph :: [node] -> Graph node () -> Graph node ()
           extractSubgraph s g = runST $ do
@@ -229,7 +242,7 @@ enumerateCycles graph = runST impl
 
         go subgraph (List.sort (vertices subgraph))
 
-      reverse <$> readMutVar resultVar
+      map reverse . reverse <$> readMutVar resultVar
 
 snoc :: [a] -> a -> [a]
 snoc xs x = xs ++ [x]
@@ -256,6 +269,36 @@ randomGraph n frequencyOfOne = do
           modifyMutVar' graphVar (addEdge i j ())
 
   readMutVar graphVar
+
+graphA :: Graph Int ()
+graphA =
+  mapWeight (const ()) $
+  addEdge 0 2 "a" $
+  addEdge 0 3 "b" $
+  addEdge 1 2 "d" $
+  addEdge 1 4 "e" $
+  addEdge 2 0 "f" $
+  addEdge 2 4 "g" $
+  addEdge 3 1 "h" $
+  addEdge 3 4 "j" $
+  addVertex 0 $
+  addVertex 1 $
+  addVertex 2 $
+  addVertex 3 $
+  addVertex 4 $
+  newGraph
+
+evalOp :: Show a => a -> IO String
+evalOp x = do
+  let !y = show x
+  assert (length y == length y) (pure ())
+  pure y
+
+test :: IO ()
+test = do
+  g <- evalOp (enumerateCycles graphA)
+
+  putStrLn $ "\n\n" ++ g
 
 -- graphToDot :: Show node => Graph node weight -> String
 -- graphToDot graph = iconcatMap (\i xs -> unlines (map (\(j, _) -> show i ++ " " ++ show j) xs)) graph
