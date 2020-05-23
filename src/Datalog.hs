@@ -18,8 +18,9 @@ import Data.Foldable (foldl', foldlM)
 import Data.Map.Strict (Map)
 import Data.Void (Void)
 import Datalog.Cudd (CuddT, DDNode)
-import Datalog.Graph
 import Datalog.CycleEnumeration
+import Datalog.Elaboration
+import Datalog.Graph
 import Datalog.Stratification
 import Datalog.Syntax
 import qualified Data.Map.Strict as Map
@@ -33,23 +34,16 @@ main = do
     Left err -> putStrLn err
     Right prog -> do
       mapM_ print prog
+      mapM_ print (renameProgram prog)
       print $ computeProgramPrecedenceGraph prog
       print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
       print $ parityStratifyCheck prog
-{-
-  implies <- Cudd.chewT $ do
-    v1 <- Cudd.ithVar 0
-    v2 <- Cudd.ithVar 1
-    conj <- Cudd.and v1 v2
-    implies <- Cudd.lEq conj v1
-    pure implies
-  print implies
--}
 
 type Constant = Int
 
 data RelAlgebra attr rel
-  = Join rel rel
+  = Rel rel
+  | Join rel rel
   | Union rel rel
   | Project [attr] rel
   | Rename attr attr rel
@@ -58,6 +52,7 @@ data RelAlgebra attr rel
   deriving stock (Eq, Show)
   deriving stock (Functor, Foldable, Traversable)
 
+{-
 interpret :: forall m rel attr. (Monad m, Ord rel) => [(rel, RelAlgebra attr rel)] -> Map rel DDNode -> CuddT m (Map rel DDNode)
 interpret tacs m = foldlM (flip (uncurry go)) m tacs
   where
@@ -79,3 +74,4 @@ interpret tacs m = foldlM (flip (uncurry go)) m tacs
       Rename attrA attrB rel -> undefined
       Difference a b -> Cudd.and a =<< Cudd.not b
       Select attr c rel -> undefined
+-}
