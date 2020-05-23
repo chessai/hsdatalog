@@ -8,6 +8,7 @@ import Control.Monad.Random.Strict (evalRandIO)
 import Data.Foldable (toList)
 import Data.List.Index (iforM_)
 import Data.Map.Strict (Map)
+import Data.Maybe
 import Data.Monoid (Sum(..))
 import Data.Primitive.MutVar
 import qualified Control.Monad.Random.Class as MonadRandom
@@ -29,6 +30,13 @@ edges = map (\(src, (tgt, w)) -> (src, tgt, w))
         . concatMap (\(src, tgts) -> (src,) <$> tgts)
         . Map.toList . fmap Map.toList . fromGraph
 
+addEdge :: (Ord node, Eq weight) => node -> node -> weight -> Graph node weight -> Graph node weight
+addEdge source target weight =
+  Graph . Map.insertWith Map.union source (Map.singleton target weight) . fromGraph
+
+addEdges :: (Ord node, Eq weight) => [(node, node, weight)] -> Graph node weight -> Graph node weight
+addEdges es g = foldr (\(s,t,w) -> addEdge s t w) g es
+
 numEdges :: Graph node weight -> Int
 numEdges = getSum . foldMap (Sum . Map.size) . fromGraph
 
@@ -44,15 +52,20 @@ neighbors graph node = Map.toList $ Map.findWithDefault mempty node (fromGraph g
 addVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
 addVertex node = Graph . Map.insertWith Map.union node mempty . fromGraph
 
-addEdge :: (Ord node, Eq weight) => node -> node -> weight -> Graph node weight -> Graph node weight
-addEdge source target weight =
-  Graph . Map.insertWith Map.union source (Map.singleton target weight) . fromGraph
+addVertices :: (Ord node) => [node] -> Graph node weight -> Graph node weight
+addVertices nodes g = foldr addVertex g nodes
 
 removeVertex :: (Ord node) => node -> Graph node weight -> Graph node weight
 removeVertex node = Graph . fmap (Map.delete node) . Map.delete node . fromGraph
 
 lookupEdge :: (Ord node) => node -> node -> Graph node weight -> Maybe weight
 lookupEdge source target (Graph g) = Map.lookup source g >>= Map.lookup target
+
+selfLoops :: (Ord node) => Graph node weight -> [(node, weight)]
+selfLoops = mapMaybe (\(s,t,w) -> if s == t then Just (s, w) else Nothing)  . edges
+
+removeSelfLoops :: (Ord node, Eq weight) => Graph node weight -> Graph node weight
+removeSelfLoops g = addEdges (filter (\(s,t,_) -> s /= t) (edges g)) (addVertices (vertices g) newGraph)
 
 mapWeight
   :: (weight -> weight')

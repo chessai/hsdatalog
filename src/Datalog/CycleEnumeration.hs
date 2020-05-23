@@ -59,7 +59,7 @@ deleteTable (Table t) k = modifyMutVar' t (Map.delete k)
 modifyTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> (v -> v) -> m ()
 modifyTable (Table t) k f = modifyMutVar' t (Map.adjust f k)
 
-enumerateWeightCycles :: forall node weight. (Ord node) => Graph node weight -> [[weight]]
+enumerateWeightCycles :: forall node weight. (Ord node, Eq weight) => Graph node weight -> [[weight]]
 enumerateWeightCycles graph = map (\loop -> go (loop ++ [head loop])) simpleCycles
   where
     go :: [node] -> [weight]
@@ -72,8 +72,11 @@ enumerateWeightCycles graph = map (\loop -> go (loop ++ [head loop])) simpleCycl
 -- | Compute the cycles in a 'WeightedGraph'
 --
 --   implements <https://www.cs.tufts.edu/comp/150GA/homeworks/hw1/Johnson%2075.PDF Johnson's Algorithm>
-enumerateCycles :: forall node weight. (Ord node) => Graph node weight -> [[node]]
-enumerateCycles (mapWeight (const ()) -> graph) = runST impl
+enumerateCycles :: forall node weight. (Ord node, Eq weight) => Graph node weight -> [[node]]
+enumerateCycles g = map (pure . fst) (selfLoops g) ++ enumerateCyclesWithoutSelfLoops (removeSelfLoops g)
+
+enumerateCyclesWithoutSelfLoops :: forall node weight. (Ord node) => Graph node weight -> [[node]]
+enumerateCyclesWithoutSelfLoops (mapWeight (const ()) -> graph) = runST impl
   where
     impl :: forall s. ST s [[node]]
     impl = do
