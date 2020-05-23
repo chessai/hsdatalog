@@ -18,6 +18,9 @@ import Data.Foldable (foldl', foldlM)
 import Data.Map.Strict (Map)
 import Data.Void (Void)
 import Datalog.Cudd (CuddT, DDNode)
+import Datalog.Graph
+import Datalog.CycleEnumeration
+import Datalog.Stratification
 import Datalog.Syntax
 import qualified Data.Map.Strict as Map
 import qualified Datalog.Cudd as Cudd
@@ -28,7 +31,11 @@ main = do
   progCode <- readFile progFile
   case parseProgram progFile progCode of
     Left err -> putStrLn err
-    Right prog -> mapM_ print prog
+    Right prog -> do
+      mapM_ print prog
+      print $ computeProgramPrecedenceGraph prog
+      print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
+      print $ parityStratifyCheck prog
 {-
   implies <- Cudd.chewT $ do
     v1 <- Cudd.ithVar 0

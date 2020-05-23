@@ -2,8 +2,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeApplications    #-}
+{-# LANGUAGE ViewPatterns        #-}
 
-module Datalog.CycleEnumeration where
+module Datalog.CycleEnumeration
+  ( enumerateCycles
+  , enumerateWeightCycles
+  ) where
 
 import           Control.Exception              (assert)
 import           Control.Monad
@@ -55,11 +59,21 @@ deleteTable (Table t) k = modifyMutVar' t (Map.delete k)
 modifyTable :: (PrimMonad m, Ord k) => Table (PrimState m) k v -> k -> (v -> v) -> m ()
 modifyTable (Table t) k f = modifyMutVar' t (Map.adjust f k)
 
+enumerateWeightCycles :: forall node weight. (Ord node) => Graph node weight -> [[weight]]
+enumerateWeightCycles graph = map (\loop -> go (loop ++ [head loop])) simpleCycles
+  where
+    go :: [node] -> [weight]
+    go [] = []
+    go [x] = []
+    go (x : y : rest) = fromMaybe (error "enumerateWeightCycles: invariant violation") (lookupEdge x y graph) : go (y : rest)
+
+    simpleCycles = enumerateCycles graph
+
 -- | Compute the cycles in a 'WeightedGraph'
 --
 --   implements <https://www.cs.tufts.edu/comp/150GA/homeworks/hw1/Johnson%2075.PDF Johnson's Algorithm>
-enumerateCycles :: forall node. (Ord node, Show node) => Graph node () -> [[node]]
-enumerateCycles graph = runST impl
+enumerateCycles :: forall node weight. (Ord node) => Graph node weight -> [[node]]
+enumerateCycles (mapWeight (const ()) -> graph) = runST impl
   where
     impl :: forall s. ST s [[node]]
     impl = do

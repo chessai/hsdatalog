@@ -1,4 +1,9 @@
-ancestor(X, Y) <- parent(X, Y).
-ancestor(X, Y) <- parent(X, Z).
-ancestor(Z, Y).
+//ancestor(X, Y) <- parent(X, Y).
+//ancestor(X, Y) <- parent(X, Z).
+//ancestor(Z, Y).
 
+liar(X) <- !liar(X).
+
+//liar1(X) <- !liar2(X).
+//liar2(X) <- !liar3(X).
+//liar3(X) <- !liar1(X).
