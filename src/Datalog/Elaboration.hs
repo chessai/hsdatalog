@@ -66,6 +66,22 @@ data Statement rel
 class Monad m => MonadTAC rel m | m -> rel where
   freshRel :: m rel
 
+-- First, construct a map whose keys are the names of relations in the subgoals
+-- of a rule, and whose values are the set of variables used in those relations.
+--
+-- Then, invert it. Now we have a map from variables to the set of relations in
+-- which they are used.
+--
+-- Then, map over the values with a function that enumerates all possible pairs
+-- that can be produced from the set. Note that pairs are unordered and must
+-- have different elements (i.e. sets of size 2).
+--
+-- Finally, invert the map again to get a map from pairs of relations to sets of
+-- variables. Choose the pair of relations that has the largest number of
+-- variables, and join on those variables. Then replace all uses of those two
+-- relations in the map in step 2 (if renaming results in a pair that has the
+-- same relation twice is, the pair should be removed). Repeat this process
+-- until there are no more pairs left.
 programToStatement :: forall m rel. MonadTAC rel m => Program rel Name -> m (Statement rel)
 programToStatement = fmap (Block . concat) . traverse go
   where
