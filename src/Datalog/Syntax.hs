@@ -9,29 +9,32 @@ module Datalog.Syntax
   , Expr
   , Declaration(..)
   , Program
+  , Constant
 
   , parseProgram
   ) where
 
 import Control.Monad
-import Data.Bifunctor (Bifunctor, bimap, first)
-import Control.Monad.State.Strict (State, evalState)
 import Control.Monad.State.Class (get, put, modify)
-import Data.Maybe
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import qualified Data.List as List
+import Control.Monad.State.Strict (State, evalState)
+import Data.Bifunctor (Bifunctor, bimap, first)
 import Data.Foldable (toList)
+import Data.Map.Strict (Map)
+import Data.Maybe
 import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Void (Void)
-import Text.Megaparsec hiding (State)
+import Text.Megaparsec
 import Text.Megaparsec.Char
+import qualified Data.List as List
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Text.Megaparsec.Char.Lexer as L
 
 --------------------------------------------------------
 
-data Relation rel var = Relation rel [var]
+type Constant = Int
+
+data Relation rel var = Relation rel [Either Constant var]
   deriving stock (Eq, Show)
   deriving stock (Functor, Foldable)
 
@@ -82,6 +85,9 @@ identifier = (lexeme . try) (ident >>= check)
     ident = (:) <$> letterChar <*> many alphaNumChar
     check = pure
 
+constant :: Parser Int
+constant = (lexeme . try) L.decimal
+
 program :: Parser (Program String String)
 program = between sc eof (many declaration)
 
@@ -96,8 +102,10 @@ declaration = do
 relation :: Parser (Relation String String)
 relation = do
   name <- identifier
-  vars <- parens (identifier `sepBy` comma)
+  vars <- parens (rhs `sepBy` comma)
   pure (Relation name vars)
+  where
+    rhs = (Left <$> constant) <|> (Right <$> identifier)
 
 expr :: Parser (Relation String String, Bool)
 expr = do

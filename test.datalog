@@ -1,7 +1,7 @@
 ancestor(X, Y) <- parent(X, Y).
 ancestor(X, Y) <- parent(X, Z), ancestor(Z, Y).
 
-//foo(X).
+//foo(1) <- foo(1).
 
 //liar(X) <- !liar(X).
 

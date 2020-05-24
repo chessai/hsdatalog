@@ -1,13 +1,18 @@
+{-# language FunctionalDependencies #-}
+{-# language MultiParamTypeClasses #-}
 {-# language ScopedTypeVariables #-}
 {-# language TupleSections #-}
 
 module Datalog.Elaboration where
 
+import Control.Monad
 import Control.Monad.State.Class (get, put, modify)
 import Control.Monad.State.Strict (State, evalState)
 import Data.Bifunctor (Bifunctor, bimap, first)
-import Data.Foldable (toList)
+import Data.Foldable (foldlM, toList)
 import Data.Map.Strict (Map)
+import Data.Maybe
+import Datalog.RelAlgebra
 import Datalog.Syntax
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -50,6 +55,40 @@ removeSubgoalDuplication = map (fmap (,0))
       n <- get
       undefined
 -}
+
+data TAC rel = TAC rel (RelAlgebra rel)
+
+data Statement rel
+  = While rel (Statement rel)
+  | Block [Statement rel]
+  | Assignment (TAC rel)
+
+class Monad m => MonadTAC rel m | m -> rel where
+  freshRel :: m rel
+
+programToStatement :: forall m rel. MonadTAC rel m => Program rel Name -> m (Statement rel)
+programToStatement = fmap (Block . concat) . traverse go
+  where
+    go :: Declaration rel Name -> m [Statement rel]
+    -- For each subgoal with an underscore, project away its unused attributes
+    go (Rule relation exprs) | any isNothing (concatMap (toList . fst) exprs) = do
+      (statements, exprs') <- (bimap concat (flip zip (map snd exprs)) . unzip)
+                              <$> traverse (projectUnused . fst) exprs
+      (statements ++) <$> go (Rule relation exprs')
+    -- Join each subgoal relation with each of the other subgoal relations,
+    -- projecting away attributes as they become unnecessary
+
+    projectUnused :: Relation rel Name -> m ([Statement rel], Relation rel Name)
+    projectUnused (Relation rel vars)
+      | all (not . isUnused) vars = pure ([], Relation rel vars)
+      | otherwise = do
+          let positions = List.findIndices (not . isUnused) vars
+          rel' <- freshRel
+          pure ([Assignment (TAC rel' (Project positions rel))], Relation rel' (filter (not . isUnused) vars))
+
+
+isUnused :: Either Constant Name -> Bool
+isUnused = either (const False) isNothing
 
 mapBoth :: Bifunctor f => (a -> b) -> f a a -> f b b
 mapBoth f = bimap f f

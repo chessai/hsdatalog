@@ -39,39 +39,4 @@ main = do
       print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
       print $ parityStratifyCheck prog
 
-type Constant = Int
 
-data RelAlgebra attr rel
-  = Rel rel
-  | Join rel rel
-  | Union rel rel
-  | Project [attr] rel
-  | Rename attr attr rel
-  | Difference rel rel
-  | Select attr Constant rel
-  deriving stock (Eq, Show)
-  deriving stock (Functor, Foldable, Traversable)
-
-{-
-interpret :: forall m rel attr. (Monad m, Ord rel) => [(rel, RelAlgebra attr rel)] -> Map rel DDNode -> CuddT m (Map rel DDNode)
-interpret tacs m = foldlM (flip (uncurry go)) m tacs
-  where
-    go :: rel -> RelAlgebra attr rel -> Map rel DDNode -> CuddT m (Map rel DDNode)
-    go rel alg m = do
-      node <- go' (looksey m <$> alg)
-      pure (Map.insert rel node m)
-
-    looksey :: Map rel rel' -> rel -> rel'
-    looksey m rel = Map.findWithDefault (error "looksey fail") rel m
-
-    go' :: RelAlgebra attr DDNode -> CuddT m DDNode
-    go' = \case
-      Join a b -> undefined
-      Union a b -> undefined
-      Project attrs rel -> do
-
-        undefined
-      Rename attrA attrB rel -> undefined
-      Difference a b -> Cudd.and a =<< Cudd.not b
-      Select attr c rel -> undefined
--}
