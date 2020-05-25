@@ -5,10 +5,11 @@ module Datalog.Stratification where
 import Datalog.CycleEnumeration (enumerateWeightCycles)
 import Datalog.Graph (Graph)
 import Datalog.Syntax
+
 import qualified Datalog.Graph as G
 
 computeProgramPrecedenceGraph :: forall rel var. (Ord rel) => Program rel var -> Graph rel Bool
-computeProgramPrecedenceGraph = foldr processDecl G.newGraph
+computeProgramPrecedenceGraph = foldr processDecl G.newGraph . decls
   where
     processDecl :: Declaration rel var -> Graph rel Bool -> Graph rel Bool
     processDecl (Rule (Relation rel _) exprs) g = foldr (processExpr rel) g exprs

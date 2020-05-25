@@ -53,6 +53,7 @@ library
     Datalog.RelAlgebra
     Datalog.Stratification
     Datalog.Syntax
+    Datalog.TypeCheck
   build-depends:
     , cudd
     , hmatrix

@@ -8,21 +8,22 @@
 
 module Datalog.Elaboration where
 
-import           Control.Monad
-import           Control.Monad.State.Class  (get, modify, put)
-import           Control.Monad.State.Strict (State, evalState)
-import           Data.Bifunctor             (Bifunctor, bimap, first, second)
-import           Data.Either
-import           Data.Foldable              (foldlM, toList)
-import qualified Data.List                  as List
-import qualified Data.List.Extra            as Extra
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
-import           Datalog.RelAlgebra
-import           Datalog.Syntax
+import Control.Monad
+import Control.Monad.State.Class (get, modify, put)
+import Control.Monad.State.Strict (State, evalState)
+import Data.Bifunctor (Bifunctor, bimap, first, second)
+import Data.Either
+import Data.Foldable (foldlM, toList)
+import Data.Map.Strict (Map)
+import Data.Maybe
+import Data.Set (Set)
+import Datalog.RelAlgebra
+import Datalog.Syntax
+
+import qualified Data.List as List
+import qualified Data.List.Extra as Extra
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 type Var = Int
 
@@ -37,7 +38,7 @@ renameProgram :: forall rel var. (Ord var) => Program rel var -> Program rel Nam
 renameProgram = normaliseRules . removeSubgoalDuplication
 
 normaliseRules :: forall rel var. (Ord var) => Program rel var -> Program rel Name
-normaliseRules = flip evalState 0 . traverse go
+normaliseRules (Program decls types) = Program (flip evalState 0 (traverse go decls)) types
   where
     go :: Declaration rel var -> State Int (Declaration rel Name)
     go d = do
@@ -49,7 +50,7 @@ normaliseRules = flip evalState 0 . traverse go
 
 -- FIXME: make this do its damn JOB!
 removeSubgoalDuplication :: forall rel var. (Ord var) => Program rel var -> Program rel (var, Int)
-removeSubgoalDuplication = map (fmap (,0))
+removeSubgoalDuplication = fmap (,0)
 {-
   map go
   where
@@ -116,7 +117,7 @@ programToStatement
   .  (MonadTAC rel m, Ord rel, Show rel)
   => Program rel Name
   -> m (Statement rel)
-programToStatement = fmap (Block . concat) . traverse go
+programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
   where
     go :: Declaration rel Name -> m [Statement rel]
     -- For each subgoal with an underscore, project away its unused attributes

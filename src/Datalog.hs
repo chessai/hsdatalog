@@ -1,12 +1,3 @@
-{-# language
-    DeriveFoldable
-  , DeriveFunctor
-  , DeriveTraversable
-  , DerivingStrategies
-  , LambdaCase
-  , ScopedTypeVariables
-#-}
-
 module Datalog
   ( main
   ) where
@@ -23,6 +14,7 @@ import Datalog.Elaboration
 import Datalog.Graph
 import Datalog.Stratification
 import Datalog.Syntax
+
 import qualified Data.Map.Strict as Map
 import qualified Datalog.Cudd as Cudd
 
@@ -33,10 +25,9 @@ main = do
   case parseProgram progFile progCode of
     Left err -> putStrLn err
     Right prog -> do
-      mapM_ print prog
-      mapM_ print (renameProgram prog)
-      print $ computeProgramPrecedenceGraph prog
-      print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
-      print $ parityStratifyCheck prog
-
-
+      mapM_ print (decls prog)
+      print (types prog)
+      --mapM_ print (renameProgram prog)
+      --print $ computeProgramPrecedenceGraph prog
+      --print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
+      --print $ parityStratifyCheck prog

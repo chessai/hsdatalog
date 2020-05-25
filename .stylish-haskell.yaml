@@ -1,0 +1,36 @@
+steps:
+# Align imports
+  - imports:
+      # see https://github.com/jaspervdj/stylish-haskell/blob/master/data/stylish-haskell.yaml#L55
+      align: group
+      pad_module_names: false
+      long_list_align: new_line_multiline
+      list_align: after_alias
+      separate_lists: true
+      space_surround: false
+      empty_list_align: inherit
+
+# Align and remove redundant language pragmas
+  - language_pragmas:
+      style: vertical
+      align: true
+      remove_redundant: true
+
+# Align records
+#  - simple_align:
+#      cases: true
+#      top_level_patterns: false
+#      records: true
+
+# Replace each tab by two spaces
+#  - tabs:
+#      spaces: 2
+
+# Remove trailing whitespace
+#  - trailing_whitespace: {}
+
+# Max number of columns per line
+columns: 80
+
+# Replace CR-LF by LF
+newline: lf

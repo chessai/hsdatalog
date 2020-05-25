@@ -8,26 +8,28 @@ module Datalog.Syntax
   ( Relation(..)
   , Expr
   , Declaration(..)
-  , Program
+  , Program(..)
   , Constant
+  , Type(..)
 
   , parseProgram
   ) where
 
-import           Control.Monad
-import           Control.Monad.State.Class  (get, modify, put)
-import           Control.Monad.State.Strict (State, evalState)
-import           Data.Bifunctor             (Bifunctor, bimap, first)
-import           Data.Foldable              (toList)
-import qualified Data.List                  as List
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
-import           Data.Void                  (Void)
-import           Text.Megaparsec
-import           Text.Megaparsec.Char
+import Control.Monad
+import Control.Monad.State.Class (get, modify, put)
+import Control.Monad.State.Strict (State, evalState, execState)
+import Data.Bifunctor (Bifunctor, bimap, first)
+import Data.Foldable (toList)
+import Data.Map.Strict (Map)
+import Data.Maybe
+import Data.Set (Set)
+import Data.Void (Void)
+import Text.Megaparsec hiding (State)
+import Text.Megaparsec.Char
+
+import qualified Data.List as List
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Text.Megaparsec.Char.Lexer as L
 
 --------------------------------------------------------
@@ -46,11 +48,30 @@ data Declaration rel var
   deriving stock (Eq, Show)
   deriving stock (Functor, Foldable)
 
-type Program rel var = [Declaration rel var]
+data Program rel var = Program
+  { decls :: [Declaration rel var]
+  , types :: Map rel Type
+  }
+  deriving stock (Eq, Show)
+  deriving stock (Functor, Foldable)
+
+-- TODO: expand this
+data Type
+  = TypeInt
+    -- ^ machine integer
+  | TypeBool
+    -- ^ boolean
+  | TypeBitString Int
+    -- ^ bit strings of length n
+  | TypeVar Int
+    -- ^ used during type inference
+  | TypeRelation [Type]
+    -- ^ top level type signature
+  deriving stock (Eq, Show)
 
 --------------------------------------------------------
 
-type Parser = Parsec Void String
+type Parser = ParsecT Void String (State (Map String Type))
 
 sc :: Parser ()
 sc = L.space (void spaceChar) lineCmt blockCmt
@@ -89,14 +110,22 @@ constant :: Parser Int
 constant = (lexeme . try) L.decimal
 
 program :: Parser (Program String String)
-program = between sc eof (many declaration)
+program = do
+  decls <- concat <$> between sc eof (many topLevel)
+  types <- get
+  pure (Program decls types)
+
+-- TODO: think about the following situation:
+--
+-- if we extend the syntax such that the typing state can be updated, but then a
+-- failure occurs and we have to backtrack, is the state change undone?
+topLevel :: Parser [Declaration String String]
+topLevel = try (typeSignature *> pure []) <|> ((:[]) <$> declaration)
 
 declaration :: Parser (Declaration String String)
 declaration = do
   rel <- relation
-  rels <- do
-    try (leftArrow *> exprs)
-    <|> (period *> pure [])
+  rels <- try (leftArrow *> exprs) <|> (period *> pure [])
   pure (Rule rel rels)
 
 relation :: Parser (Relation String String)
@@ -106,6 +135,21 @@ relation = do
   pure (Relation name vars)
   where
     rhs = (Left <$> constant) <|> (Right <$> identifier)
+
+typeSignature :: Parser ()
+typeSignature = do
+  name <- identifier
+  symbol ":"
+  reserved "Relation"
+  types <- parens (typ `sepBy`comma)
+  period
+  modify (Map.insert name (TypeRelation types))
+
+typ :: Parser Type
+typ = do
+      (TypeInt <$ reserved "Int")
+  <|> (TypeBool <$ reserved "Bool")
+  <|> (reserved "BitString" *> (TypeBitString <$> L.decimal))
 
 expr :: Parser (Relation String String, Bool)
 expr = do
@@ -117,4 +161,4 @@ exprs :: Parser [(Relation String String, Bool)]
 exprs = between sc period (expr `sepBy` comma)
 
 parseProgram :: FilePath -> String -> Either String (Program String String)
-parseProgram file input = first errorBundlePretty $ runParser program file input
+parseProgram file input = first errorBundlePretty $ flip evalState Map.empty $ runParserT program file input

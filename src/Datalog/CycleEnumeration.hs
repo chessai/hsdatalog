@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -9,35 +8,35 @@ module Datalog.CycleEnumeration
   , enumerateWeightCycles
   ) where
 
-import           Control.Exception              (assert)
-import           Control.Monad
-import           Control.Monad.Extra
-import           Control.Monad.Primitive
-import           Control.Monad.Random.Class     (MonadRandom, getRandom)
-import qualified Control.Monad.Random.Class     as MonadRandom
-import           Control.Monad.Random.Strict    (evalRandIO)
-import           Control.Monad.ST               (ST, runST)
-import           Control.Monad.ST.Unsafe        (unsafeIOToST)
-import           Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
-import           Data.Bifunctor                 (first, second)
-import           Data.Foldable                  (toList, traverse_)
-import           Data.Graph                     (Forest, Tree, buildG)
-import qualified Data.Graph                     as Containers
-import qualified Data.List                      as List
-import qualified Data.List.Extra                as Extra
-import           Data.List.Index                (iconcatMap, iforM_, imap)
-import           Data.Map.Strict                (Map)
-import qualified Data.Map.Strict                as Map
-import           Data.Maybe
-import           Data.Monoid                    (Sum (..))
-import           Data.Primitive.MutVar
-import           Data.Set                       (Set)
-import qualified Data.Set                       as Set
-import qualified Data.Vector                    as Vector
-import           Data.Vector.Mutable            (MVector)
-import qualified Data.Vector.Mutable            as MVector
+import Control.Exception (assert)
+import Control.Monad
+import Control.Monad.Extra
+import Control.Monad.Primitive
+import Control.Monad.Random.Class (MonadRandom, getRandom)
+import Control.Monad.Random.Strict (evalRandIO)
+import Control.Monad.ST (ST, runST)
+import Control.Monad.ST.Unsafe (unsafeIOToST)
+import Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
+import Data.Bifunctor (first, second)
+import Data.Foldable (toList, traverse_)
+import Data.Graph (Forest, Tree, buildG)
+import Data.List.Index (iconcatMap, iforM_, imap)
+import Data.Map.Strict (Map)
+import Data.Maybe
+import Data.Monoid (Sum (..))
+import Data.Primitive.MutVar
+import Data.Set (Set)
+import Data.Vector.Mutable (MVector)
+import Datalog.Graph
 
-import           Datalog.Graph
+import qualified Control.Monad.Random.Class as MonadRandom
+import qualified Data.Graph as Containers
+import qualified Data.List as List
+import qualified Data.List.Extra as Extra
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import qualified Data.Vector as Vector
+import qualified Data.Vector.Mutable as MVector
 
 newtype Table s k v = Table (MutVar s (Map k v))
 

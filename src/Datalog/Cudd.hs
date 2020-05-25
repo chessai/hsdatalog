@@ -1,8 +1,6 @@
-{-# language
-    DerivingStrategies
-  , GeneralisedNewtypeDeriving
-  , ScopedTypeVariables
-#-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 
 module Datalog.Cudd
   ( CuddT(..)
@@ -36,9 +34,10 @@ import Control.Monad.Reader (ReaderT, runReaderT)
 import Control.Monad.Reader.Class (MonadReader, reader)
 import Cudd.Cudd (DDManager, DDNode, SatBit)
 import Data.Foldable (foldlM)
-import Data.Functor.Identity (Identity(..))
+import Data.Functor.Identity (Identity (..))
 import Data.Map.Strict (Map)
-import Prelude hiding (and, or, not)
+import Prelude hiding (and, not, or)
+
 import qualified Cudd.Cudd as PureCudd
 import qualified Data.Map.Strict as Map
 

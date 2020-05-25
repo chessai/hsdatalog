@@ -5,7 +5,7 @@
 
 module Datalog.RelAlgebra where
 
-import           Numeric.Natural
+import Numeric.Natural
 
 type Attr = Int
 

@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections       #-}
 
 module Datalog.Graph where
 
@@ -9,8 +9,9 @@ import Data.Foldable (toList)
 import Data.List.Index (iforM_)
 import Data.Map.Strict (Map)
 import Data.Maybe
-import Data.Monoid (Sum(..))
+import Data.Monoid (Sum (..))
 import Data.Primitive.MutVar
+
 import qualified Control.Monad.Random.Class as MonadRandom
 import qualified Data.Graph as Containers
 import qualified Data.List.Extra as Extra
