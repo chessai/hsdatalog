@@ -1,11 +1,11 @@
-{-# language DerivingStrategies #-}
-{-# language DeriveFoldable #-}
-{-# language DeriveFunctor #-}
-{-# language DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable     #-}
+{-# LANGUAGE DeriveFunctor      #-}
+{-# LANGUAGE DeriveTraversable  #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module Datalog.RelAlgebra where
 
-import Numeric.Natural
+import           Numeric.Natural
 
 type Attr = Int
 

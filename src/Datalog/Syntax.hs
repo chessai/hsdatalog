@@ -1,8 +1,8 @@
-{-# language DeriveFoldable #-}
-{-# language DeriveFunctor #-}
-{-# language DerivingStrategies #-}
-{-# language ScopedTypeVariables #-}
-{-# language TupleSections #-}
+{-# LANGUAGE DeriveFoldable      #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
 
 module Datalog.Syntax
   ( Relation(..)
@@ -14,20 +14,20 @@ module Datalog.Syntax
   , parseProgram
   ) where
 
-import Control.Monad
-import Control.Monad.State.Class (get, put, modify)
-import Control.Monad.State.Strict (State, evalState)
-import Data.Bifunctor (Bifunctor, bimap, first)
-import Data.Foldable (toList)
-import Data.Map.Strict (Map)
-import Data.Maybe
-import Data.Set (Set)
-import Data.Void (Void)
-import Text.Megaparsec
-import Text.Megaparsec.Char
-import qualified Data.List as List
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+import           Control.Monad
+import           Control.Monad.State.Class  (get, modify, put)
+import           Control.Monad.State.Strict (State, evalState)
+import           Data.Bifunctor             (Bifunctor, bimap, first)
+import           Data.Foldable              (toList)
+import qualified Data.List                  as List
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as Map
+import           Data.Maybe
+import           Data.Set                   (Set)
+import qualified Data.Set                   as Set
+import           Data.Void                  (Void)
+import           Text.Megaparsec
+import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 --------------------------------------------------------

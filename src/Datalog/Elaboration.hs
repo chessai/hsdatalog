@@ -1,23 +1,29 @@
-{-# language FunctionalDependencies #-}
-{-# language MultiParamTypeClasses #-}
-{-# language ScopedTypeVariables #-}
-{-# language TupleSections #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FunctionalDependencies     #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 
 module Datalog.Elaboration where
 
-import Control.Monad
-import Control.Monad.State.Class (get, put, modify)
-import Control.Monad.State.Strict (State, evalState)
-import Data.Bifunctor (Bifunctor, bimap, first)
-import Data.Foldable (foldlM, toList)
-import Data.Map.Strict (Map)
-import Data.Maybe
-import Datalog.RelAlgebra
-import Datalog.Syntax
-import qualified Data.List as List
-import qualified Data.Map.Strict as Map
+import           Control.Monad
+import           Control.Monad.State.Class  (get, modify, put)
+import           Control.Monad.State.Strict (State, evalState)
+import           Data.Bifunctor             (Bifunctor, bimap, first, second)
+import           Data.Either
+import           Data.Foldable              (foldlM, toList)
+import qualified Data.List                  as List
+import qualified Data.List.Extra            as Extra
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as Map
+import           Data.Maybe
+import           Data.Set                   (Set)
+import qualified Data.Set                   as Set
+import           Datalog.RelAlgebra
+import           Datalog.Syntax
 
-type Name = Maybe Int
 
 used :: (Foldable t, Ord var) => t var -> ([var], [var])
 used d =
@@ -108,5 +114,3 @@ isUnused = either (const False) isNothing
 
 mapBoth :: Bifunctor f => (a -> b) -> f a a -> f b b
 mapBoth f = bimap f f
-
-
