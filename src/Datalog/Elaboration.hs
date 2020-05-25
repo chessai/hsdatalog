@@ -25,10 +25,6 @@ import qualified Data.List.Extra as Extra
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-type Var = Int
-
-type Name = Maybe Var
-
 used :: (Foldable t, Ord var) => t var -> ([var], [var])
 used d =
   let allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))

@@ -12,6 +12,8 @@ module Datalog.Syntax
   , Program(..)
   , Constant(..)
   , Type(..)
+  , Var
+  , Name
 
   , parseProgram
   , negatedToBool
@@ -35,6 +37,15 @@ import qualified Data.Set as Set
 import qualified Text.Megaparsec.Char.Lexer as L
 
 --------------------------------------------------------
+
+type Var = Int
+
+-- TODO: change to this
+--data Name
+--  = ParseName String
+--  | ElaborationName (Maybe Var)
+
+type Name = Maybe Var
 
 data Constant
   = ConstantInt Int
