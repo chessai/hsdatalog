@@ -12,6 +12,7 @@ import Datalog.Cudd (CuddT, DDNode)
 import Datalog.CycleEnumeration
 import Datalog.Elaboration
 import Datalog.Graph
+import Datalog.Pretty
 import Datalog.Stratification
 import Datalog.Syntax
 
@@ -25,9 +26,9 @@ main = do
   case parseProgram progFile progCode of
     Left err -> putStrLn err
     Right prog -> do
-      mapM_ print (decls prog)
+      mapM_ (putStrLn . pretty) (decls prog)
       print (types prog)
-      --mapM_ print (renameProgram prog)
+      --mapM_ (putStrLn . pretty) (renameProgram prog)
       --print $ computeProgramPrecedenceGraph prog
       --print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
       --print $ parityStratifyCheck prog

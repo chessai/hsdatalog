@@ -50,6 +50,7 @@ library
     Datalog.CycleEnumeration
     Datalog.Elaboration
     Datalog.Graph
+    Datalog.Pretty
     Datalog.RelAlgebra
     Datalog.Stratification
     Datalog.Syntax

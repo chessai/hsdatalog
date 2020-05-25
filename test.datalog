@@ -1,9 +1,9 @@
 ancestor : Relation(Int, Int).
-ancestor(X, Y) <- parent(X, Y).
-ancestor(X, Y) <- parent(X, Z), ancestor(Z, Y).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 
 path(X, X).
-path(X, Y) <- neighbor(X, Y).
-path(X, Y) <- path(X, Z), path(Z, Y).
+path(X, Y) :- neighbor(X, Y).
+path(X, Y) :- path(X, Z), path(Z, Y).
 
-//liar(X) <- !liar(X).
+liar(X) :- !liar(X).

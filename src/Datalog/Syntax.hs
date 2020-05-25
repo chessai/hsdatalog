@@ -6,6 +6,7 @@
 
 module Datalog.Syntax
   ( Relation(..)
+  , Negated(..)
   , Expr
   , Declaration(..)
   , Program(..)
@@ -13,6 +14,7 @@ module Datalog.Syntax
   , Type(..)
 
   , parseProgram
+  , negatedToBool
   ) where
 
 import Control.Monad
@@ -47,7 +49,14 @@ data Relation rel var = Relation
   deriving stock (Eq, Show)
   deriving stock (Functor, Foldable)
 
-type Expr rel var = (Relation rel var, Bool)
+data Negated = Negated | NotNegated
+  deriving stock (Eq, Show)
+
+negatedToBool :: Negated -> Bool
+negatedToBool Negated = False
+negatedToBool NotNegated = True
+
+type Expr rel var = (Relation rel var, Negated)
 
 data Declaration rel var
   = Rule (Relation rel var) [Expr rel var]
@@ -92,8 +101,8 @@ lexeme = L.lexeme sc
 comma :: Parser ()
 comma = void (symbol ",")
 
-leftArrow :: Parser ()
-leftArrow = void (symbol "<-")
+infersFrom :: Parser ()
+infersFrom = void (symbol ":-")
 
 period :: Parser ()
 period = void (symbol ".")
@@ -144,7 +153,7 @@ topLevel = try (typeSignature *> pure []) <|> ((:[]) <$> declaration)
 declaration :: Parser (Declaration String String)
 declaration = do
   rel <- relation
-  rels <- try (leftArrow *> exprs) <|> (period *> pure [])
+  rels <- try (infersFrom *> exprs) <|> (period *> pure [])
   pure (Rule rel rels)
 
 relation :: Parser (Relation String String)
@@ -170,13 +179,13 @@ typ = do
   <|> (TypeBool <$ reserved "Bool")
   <|> (reserved "BitString" *> (TypeBitString <$> L.decimal))
 
-expr :: Parser (Relation String String, Bool)
+expr :: Parser (Relation String String, Negated)
 expr = do
-  negated <- isJust <$> try (optional (symbol "!"))
+  negated <- maybe NotNegated (const Negated) <$> try (optional (symbol "!"))
   rel <- relation
-  pure (rel, not negated)
+  pure (rel, negated)
 
-exprs :: Parser [(Relation String String, Bool)]
+exprs :: Parser [(Relation String String, Negated)]
 exprs = between sc period (expr `sepBy` comma)
 
 parseProgram :: FilePath -> String -> Either String (Program String String)

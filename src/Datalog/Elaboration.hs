@@ -152,7 +152,7 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
              , Assignment (TAC joined (Join (fromIntegral joinSize)
                                        renamedLHS renamedRHS))
              ]
-           , (Relation joined (Right <$> joinedParams), True)
+           , (Relation joined (Right <$> joinedParams), NotNegated)
              : deleteAt lhs (deleteAt rhs subgoals)
            )
       where

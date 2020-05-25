@@ -15,7 +15,7 @@ computeProgramPrecedenceGraph = foldr processDecl G.newGraph . decls
     processDecl (Rule (Relation rel _) exprs) g = foldr (processExpr rel) g exprs
 
     processExpr :: rel -> Expr rel var -> Graph rel Bool -> Graph rel Bool
-    processExpr relSource (Relation relTarget _, b) = G.addEdge relSource relTarget b
+    processExpr relSource (Relation relTarget _, b) = G.addEdge relSource relTarget (negatedToBool b)
                                                       . G.addVertex relSource
                                                       . G.addVertex relTarget
 
