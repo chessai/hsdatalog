@@ -1,6 +1,10 @@
 ancestor(X, Y) <- parent(X, Y).
 ancestor(X, Y) <- parent(X, Z), ancestor(Z, Y).
 
+path(X, X).
+path(X, Y) <- neighbor(X, Y).
+path(X, Y) <- path(X, Z), path(Z, Y).
+
 //foo(1) <- foo(1).
 
 //liar(X) <- !liar(X).

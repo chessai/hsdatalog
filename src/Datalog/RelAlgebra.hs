@@ -19,7 +19,7 @@ data RelAlgebra rel
   | Rename AttrPermutation rel
   | Difference rel rel
   | Select Attr Int rel -- Int constants are all we have right now
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
   deriving stock (Functor, Foldable, Traversable)
 
 {-
