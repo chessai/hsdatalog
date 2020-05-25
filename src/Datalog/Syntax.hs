@@ -9,7 +9,7 @@ module Datalog.Syntax
   , Expr
   , Declaration(..)
   , Program(..)
-  , Constant
+  , Constant(..)
   , Type(..)
 
   , parseProgram
@@ -34,9 +34,16 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 --------------------------------------------------------
 
-type Constant = Int
+data Constant
+  = ConstantInt Int
+  | ConstantBool Bool
+  | ConstantBitString [Bool]
+  deriving stock (Eq, Show)
 
-data Relation rel var = Relation rel [Either Constant var]
+data Relation rel var = Relation
+  { relRelation :: rel
+  , relArguments :: [Either Constant var]
+  }
   deriving stock (Eq, Show)
   deriving stock (Functor, Foldable)
 
@@ -106,8 +113,20 @@ identifier = (lexeme . try) (ident >>= check)
     ident = (:) <$> letterChar <*> many alphaNumChar
     check = pure
 
-constant :: Parser Int
-constant = (lexeme . try) L.decimal
+bool :: Parser Bool
+bool = (True <$ reserved "#true") <|> (False <$ reserved "#false")
+
+bitString :: Parser [Bool]
+bitString = do
+  symbol "#"
+  many ((True <$ symbol "1") <|> (False <$ symbol "0"))
+
+constant :: Parser Constant
+constant = (lexeme . try)
+  ( (ConstantInt <$> L.decimal)
+    <|> (ConstantBool <$> bool)
+    <|> (ConstantBitString <$> bitString)
+  )
 
 program :: Parser (Program String String)
 program = do
