@@ -36,5 +36,5 @@ instance (Pretty rel, Pretty var) => Pretty (Declaration rel var) where
   pretty (Rule rel exprs) = pretty rel ++ " :- " ++ intercalate ", " (map prettyExpr exprs) ++ "."
 
 prettyExpr :: (Pretty rel, Pretty var) => Expr rel var -> String
-prettyExpr (rel, negated) = (case negated of { Negated -> "!"; NotNegated -> ""; }) ++ pretty rel
+prettyExpr (rel, negated) = bool "!" "" (negatedToBool negated) ++ pretty rel
 
