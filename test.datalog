@@ -6,4 +6,13 @@ path(X, X).
 path(X, Y) :- neighbor(X, Y).
 path(X, Y) :- path(X, Z), path(Z, Y).
 
-liar(X) :- !liar(X).
+testBitString : Relation(BitString 4).
+testBitString(#0011).
+
+testBool : Relation(Bool).
+testBool(#false).
+
+testInt : Relation(Int).
+testInt(100).
+
+//liar(X) :- !liar(X).

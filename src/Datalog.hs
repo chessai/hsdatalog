@@ -26,9 +26,35 @@ main = do
   case parseProgram progFile progCode of
     Left err -> putStrLn err
     Right prog -> do
-      mapM_ (putStrLn . pretty) (decls prog)
-      print (types prog)
-      --mapM_ (putStrLn . pretty) (renameProgram prog)
-      --print $ computeProgramPrecedenceGraph prog
-      --print $ enumerateWeightCycles $ computeProgramPrecedenceGraph prog
-      --print $ parityStratifyCheck prog
+      putStrLn "Input program:"
+      printProgram prog
+      putStrLn ""
+
+      putStrLn "Renamed program:"
+      printProgram (renameProgram prog)
+      putStrLn ""
+
+      putStrLn "Predicate Dependency Graph:"
+      putStrLn $ prettyGraph $ computePredicateDependencyGraph prog
+      putStrLn ""
+
+      putStrLn "Enumerated weight cycles: "
+      putStrLn $ pretty $ enumerateWeightCycles $ computePredicateDependencyGraph prog
+      putStrLn ""
+
+      putStrLn "Parity Stratification Check: "
+      putStrLn $ pretty $ parityStratifyCheck prog
+      putStrLn ""
+
+printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
+printProgram prog = do
+  putStrLn "Declarations:"
+  mapM_ (putStrLn . pretty) (decls prog)
+  putStrLn ""
+  putStrLn "Types:"
+  mapM_ (putStrLn . uncurry prettyType) (Map.toList (types prog))
+
+prettyGraph :: (Pretty node, Pretty weight) => Graph node weight -> String
+prettyGraph = unlines . map go . edges
+  where
+    go (source, target, weight) = pretty source ++ " -> " ++ pretty target ++ "; [" ++ pretty weight ++ "]"

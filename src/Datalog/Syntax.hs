@@ -13,10 +13,10 @@ module Datalog.Syntax
   , Constant(..)
   , Type(..)
   , Var
-  , Name
+  , Name(..)
 
   , parseProgram
-  , negatedToBool
+  , isNotNegated
   ) where
 
 import Control.Monad
@@ -40,12 +40,10 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 type Var = Int
 
--- TODO: change to this
---data Name
---  = ParseName String
---  | ElaborationName (Maybe Var)
-
-type Name = Maybe Var
+data Name
+  = ParseName (Maybe String)
+  | ElaborationName (Maybe Var)
+   deriving stock (Eq, Ord, Show)
 
 data Constant
   = ConstantInt Int
@@ -63,9 +61,9 @@ data Relation rel var = Relation
 data Negated = Negated | NotNegated
   deriving stock (Eq, Show)
 
-negatedToBool :: Negated -> Bool
-negatedToBool Negated = False
-negatedToBool NotNegated = True
+isNotNegated :: Negated -> Bool
+isNotNegated Negated = False
+isNotNegated NotNegated = True
 
 type Expr rel var = (Relation rel var, Negated)
 
@@ -98,7 +96,7 @@ data Type
 
 --------------------------------------------------------
 
-type Parser = ParsecT Void String (State (Map String Type))
+type Parser = ParsecT Void String (State (Map Name Type))
 
 sc :: Parser ()
 sc = L.space (void spaceChar) lineCmt blockCmt
@@ -127,11 +125,10 @@ parens = between (symbol "(") (symbol ")")
 reserved :: String -> Parser ()
 reserved w = string w *> notFollowedBy alphaNumChar *> sc
 
-identifier :: Parser String
-identifier = (lexeme . try) (ident >>= check)
+identifier :: Parser Name
+identifier = (lexeme . try) (ParseName . Just <$> ident)
   where
     ident = (:) <$> letterChar <*> many alphaNumChar
-    check = pure
 
 bool :: Parser Bool
 bool = (True <$ reserved "#true") <|> (False <$ reserved "#false")
@@ -148,7 +145,7 @@ constant = (lexeme . try)
     <|> (ConstantBitString <$> bitString)
   )
 
-program :: Parser (Program String String)
+program :: Parser (Program Name Name)
 program = do
   decls <- concat <$> between sc eof (many topLevel)
   types <- get
@@ -158,16 +155,16 @@ program = do
 --
 -- if we extend the syntax such that the typing state can be updated, but then a
 -- failure occurs and we have to backtrack, is the state change undone?
-topLevel :: Parser [Declaration String String]
+topLevel :: Parser [Declaration Name Name]
 topLevel = try (typeSignature *> pure []) <|> ((:[]) <$> declaration)
 
-declaration :: Parser (Declaration String String)
+declaration :: Parser (Declaration Name Name)
 declaration = do
   rel <- relation
   rels <- try (infersFrom *> exprs) <|> (period *> pure [])
   pure (Rule rel rels)
 
-relation :: Parser (Relation String String)
+relation :: Parser (Relation Name Name)
 relation = do
   name <- identifier
   vars <- parens (rhs `sepBy` comma)
@@ -190,14 +187,14 @@ typ = do
   <|> (TypeBool <$ reserved "Bool")
   <|> (reserved "BitString" *> (TypeBitString <$> L.decimal))
 
-expr :: Parser (Relation String String, Negated)
+expr :: Parser (Relation Name Name, Negated)
 expr = do
   negated <- maybe NotNegated (const Negated) <$> try (optional (symbol "!"))
   rel <- relation
   pure (rel, negated)
 
-exprs :: Parser [(Relation String String, Negated)]
+exprs :: Parser [(Relation Name Name, Negated)]
 exprs = between sc period (expr `sepBy` comma)
 
-parseProgram :: FilePath -> String -> Either String (Program String String)
+parseProgram :: FilePath -> String -> Either String (Program Name Name)
 parseProgram file input = first errorBundlePretty $ flip evalState Map.empty $ runParserT program file input

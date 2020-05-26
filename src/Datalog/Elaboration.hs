@@ -1,6 +1,7 @@
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
@@ -42,7 +43,7 @@ normaliseRules (Program decls types) = Program (flip evalState 0 (traverse go de
       n <- get
       let renamings = Map.fromList (map (,Nothing) usedOnce ++ zip usedMany (Just <$> [n..]))
       modify (+ length usedMany)
-      pure (fmap (renamings Map.!) d)
+      pure (fmap (ElaborationName . (renamings Map.!)) d)
 
 -- FIXME: make this do its damn JOB!
 removeSubgoalDuplication :: forall rel var. (Ord var) => Program rel var -> Program rel (var, Int)
@@ -108,6 +109,19 @@ instance MonadTAC Rel TacM where
 
 type SubgoalIndex = Int
 
+isNameUnused :: Name -> Bool
+isNameUnused = \case
+  ParseName m -> isNothing m
+  ElaborationName m -> isNothing m
+
+getVar :: Name -> Maybe Var
+getVar = \case
+  ParseName _ -> Nothing
+  ElaborationName m -> m
+
+catVars :: [Name] -> [Var]
+catVars = mapMaybe (\case { ParseName _ -> Nothing; ElaborationName m -> m; })
+
 programToStatement
   :: forall m rel
   .  (MonadTAC rel m, Ord rel, Show rel)
@@ -117,7 +131,7 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
   where
     go :: Declaration rel Name -> m [Statement rel]
     -- For each subgoal with an underscore, project away its unused attributes
-    go (Rule relH exprs) | any isNothing (concatMap (toList . fst) exprs) = do
+    go (Rule relH exprs) | any isNameUnused (concatMap (toList . fst) exprs) = do
       (statements, exprs') <- (bimap concat (flip zip (map snd exprs)) . unzip)
                               <$> traverse (projectUnused . fst) exprs
       (statements ++) <$> go (Rule relH exprs')
@@ -157,7 +171,7 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
           Map.fromListWith Set.union
           $ concatMap
             (\(ix, (Relation _ vars, _)) -> map (, Set.singleton ix)
-                                            (catMaybes (rights vars)))
+                                            (catVars (rights vars)))
           $ zip [0..] subgoals
 
         joinPairs :: Map (SubgoalIndex, SubgoalIndex) (Set Var)
@@ -179,20 +193,20 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
         permutationLHS, permutationRHS :: AttrPermutation
         permutationLHS =
           let names = rights lhsVars
-              joinIndices = map ((`unsafeElemIndex` names) . Just)
+              joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
                             $ toList joinVars
               notJoinIndices = map fst
                                $ filter (not . (`Set.member` joinVars) . snd)
-                               $ mapMaybe sequenceA
+                               $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
                                $ zip [0..] names
           in notJoinIndices ++ joinIndices
         permutationRHS =
           let names = rights rhsVars
-              joinIndices = map ((`unsafeElemIndex` names) . Just)
+              joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
                             $ toList joinVars
               notJoinIndices = map fst
                                $ filter (not . (`Set.member` joinVars) . snd)
-                               $ mapMaybe sequenceA
+                               $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
                                $ zip [0..] names
           in joinIndices ++ notJoinIndices
 
@@ -225,7 +239,7 @@ deleteAt :: Int -> [a] -> [a]
 deleteAt n xs = uncurry (++) $ second tail $ Extra.splitAt n xs
 
 isUnused :: Either Constant Name -> Bool
-isUnused = either (const False) isNothing
+isUnused = either (const False) isNameUnused
 
 mapBoth :: Bifunctor f => (a -> b) -> f a a -> f b b
 mapBoth f = bimap f f
