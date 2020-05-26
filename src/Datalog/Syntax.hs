@@ -49,7 +49,7 @@ data Constant
   = ConstantInt Int
   | ConstantBool Bool
   | ConstantBitString [Bool]
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
 
 data Relation rel var = Relation
   { relRelation :: rel

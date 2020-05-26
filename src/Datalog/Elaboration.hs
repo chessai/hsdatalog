@@ -139,8 +139,6 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
       (statements ++) <$> go (Rule relH exprs')
       -- FIXME: wrong because we need two different namespaces for
       -- compiler-generated vs parsed names
-    -- Join each subgoal relation with each of the other subgoal relations,
-    -- projecting away attributes as they become unnecessary
     go decl = error (show decl)
 
     projectUnused :: Relation rel Name -> m ([Statement rel], Relation rel Name)
@@ -153,13 +151,49 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
                , Relation rel' (filter (not . isUnused) vars)
                )
 
-needsJoin :: [Expr rel Name] -> Bool
-needsJoin = any (> 1) . Map.fromListWith (+) . map (, 1) . rights . concatMap (relArguments . fst)
+-- | For each subgoal with a constant, use the select and project operators to
+--   restrict the relation to match the constant.
+selectConstants :: forall m rel. (MonadTAC rel m) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
+selectConstants subgoals = (bimap concat (flip zip (map snd subgoals)) . unzip)
+                           <$> traverse (go . fst) subgoals
+  where
+    go :: Relation rel Name -> m ([Statement rel], Relation rel Name)
+    go (Relation rel args) | all isRight args = pure ([], Relation rel args)
+    go (Relation rel args) = do
+      let constants :: [(Int, Constant)]
+          constants = rights $ map (sequenceA . fmap flipEither) $ zip [0..] args
+      rels <- replicateM (length constants) freshRel
+      let selects :: [Statement rel]
+          selects = zipWith3 (\prevRel newRel (attr, constant) -> Assignment (TAC newRel (Select attr constant prevRel)))
+                             (rel : init rels)
+                             rels
+                             constants
+      projectRel <- freshRel
+      let project :: Statement rel
+          project = Assignment (TAC projectRel (Project (List.findIndices isRight args) (last rels)))
 
+      pure (selects ++ [project], Relation projectRel (filter isRight args))
+
+flipEither :: Either a b -> Either b a
+flipEither = either Right Left
+
+--data Relation rel var = Relation
+--  { relRelation :: rel
+--  , relArguments :: [Either Constant var]
+--  }
+
+-- Select Attr Constant rel
+
+hasConstant :: Relation rel var -> Bool
+hasConstant = any isLeft . relArguments
+
+-- | Join each subgoal relation with each of the other subgoal relations,
+--   projecting away attributes as they become unnecessary
+--
 -- TODO: lhs/rhs of join should be based on minimising renaming
 --       could increase total amount of renaming but this is probably a good
 --       greedy heuristic to adopt
-joinSubgoals :: (MonadTAC rel m, Show rel) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
+joinSubgoals :: (MonadTAC rel m) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
 joinSubgoals subgoals | not (needsJoin subgoals) = pure ([], subgoals)
 joinSubgoals subgoals = do
   renamedLHS <- freshRel
@@ -226,6 +260,9 @@ joinSubgoals subgoals = do
     joinedParams =
       applyPermutation permutationLHS (rights lhsVars)
       ++ drop joinSize (applyPermutation permutationRHS (rights rhsVars))
+
+needsJoin :: [Expr rel Name] -> Bool
+needsJoin = any (> 1) . Map.fromListWith (+) . map (, 1) . rights . concatMap (relArguments . fst)
 
 applyPermutation :: AttrPermutation -> [a] -> [a]
 applyPermutation perm xs = map (xs !!) perm

@@ -5,6 +5,7 @@
 
 module Datalog.RelAlgebra where
 
+import Datalog.Syntax
 import Numeric.Natural
 
 type Attr = Int
@@ -18,7 +19,7 @@ data RelAlgebra rel
   | Project [Attr] rel
   | Rename AttrPermutation rel
   | Difference rel rel
-  | Select Attr Int rel -- Int constants are all we have right now
+  | Select Attr Constant rel -- Int constants are all we have right now
   deriving stock (Eq, Ord, Show)
   deriving stock (Functor, Foldable, Traversable)
 

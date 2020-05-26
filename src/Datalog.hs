@@ -48,6 +48,7 @@ main = do
       putStrLn $ pretty $ parityStratifyCheck prog
       putStrLn ""
 -}
+{-
       let (stmts, exprs) = runTacM $ do
             (stmts0, exprs0) <- joinSubgoals
               $ map ((, NotNegated) . fmap ElaborationName)
@@ -57,6 +58,15 @@ main = do
                 ]
             (stmts1, exprs1) <- joinSubgoals exprs0
             pure (stmts0 ++ stmts1, exprs1)
+-}
+
+      let (stmts, exprs) = runTacM $ do
+            (stmts0, exprs0) <- selectConstants
+              $ map ((, NotNegated) . fmap ElaborationName)
+                [ Relation 20 [Left (ConstantInt 3), Right (Just 6), Left (ConstantBitString [True,True,True,False])]
+                , Relation 22 [Right (Just 6)]
+                ]
+            pure (stmts0, exprs0)
 
       mapM_ (putStrLn . pretty) stmts
       mapM_ (putStrLn . prettyExpr) exprs
