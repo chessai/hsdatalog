@@ -3,13 +3,16 @@
 
 module Datalog.Pretty where
 
-import           Data.Bool (bool)
-import           Data.List (intercalate)
-import           Data.Maybe
-import           Data.Text (Text)
+import Data.Bool (bool)
+import Data.List (intercalate)
+import Data.Maybe
+import Data.Text (Text)
+import Datalog.Elaboration
+import Datalog.RelAlgebra
+import Datalog.Syntax
+import Datalog.TypeCheck
+
 import qualified Data.Text as T
-import           Datalog.Syntax
-import           Datalog.TypeCheck
 
 class Pretty a where
   pretty :: a -> String
@@ -55,8 +58,47 @@ instance Pretty Name where
     ParseName m -> fromMaybe "_" m
     ElaborationName m -> maybe "_" (("elab" ++) . pretty) m
 
+instance (Pretty rel) => Pretty (RelAlgebra rel) where
+  pretty = \case
+    Not rel -> "¬" ++ pretty rel
+    -- was "⋈" but you can barely see it
+    Join sub x y -> pretty x ++ " ∞" ++ showSubscript sub ++ " " ++ pretty y
+    Union x y -> pretty x ++ " ∪ " ++ pretty y
+    Project attrs rel -> "π(" ++ pretty attrs ++ ", " ++ pretty rel ++ ")"
+    Rename perm rel -> "ρ(" ++ pretty perm ++ ", " ++ pretty rel ++ ")"
+    Difference x y -> pretty x ++ " – " ++ pretty y
+    Select attr cnst rel -> "σ(" ++ pretty attr ++ " = " ++ pretty cnst ++ ", " ++ pretty rel ++ ")"
+
+instance (Pretty rel) => Pretty (Statement rel) where
+  pretty = \case
+    While rel s -> "while " ++ pretty rel ++ " { " ++ pretty s ++ " }"
+    Block ss -> "{ " ++ concatMap ((++ "; ") . pretty) ss ++ "}"
+    Assignment t -> pretty t
+
+instance (Pretty rel) => Pretty (TAC rel) where
+  pretty (TAC rel alg) = pretty rel ++ " := " ++ pretty alg
+
 prettyExpr :: (Pretty rel, Pretty var) => Expr rel var -> String
 prettyExpr (rel, negated) = bool "!" "" (isNotNegated negated) ++ pretty rel
 
 prettyType :: (Pretty name) => name -> Type -> String
 prettyType name typ = pretty name ++ " : " ++ pretty typ ++ "."
+
+showSubscript :: (Integral a, Show a) => a -> String
+showSubscript = map toSubscript . show
+  where
+    toSubscript :: Char -> Char
+    toSubscript = \case
+      '0'   -> '₀'
+      '1'   -> '₁'
+      '2'   -> '₂'
+      '3'   -> '₃'
+      '4'   -> '₄'
+      '5'   -> '₅'
+      '6'   -> '₆'
+      '7'   -> '₇'
+      '8'   -> '₈'
+      '9'   -> '₉'
+      other -> other
+
+

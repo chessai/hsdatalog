@@ -26,6 +26,8 @@ import qualified Data.List.Extra as Extra
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import Debug.Trace
+
 used :: (Foldable t, Ord var) => t var -> ([var], [var])
 used d =
   let allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))
@@ -151,79 +153,82 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
                , Relation rel' (filter (not . isUnused) vars)
                )
 
-    joinSubgoals :: [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
-    joinSubgoals subgoals | not (needsJoin subgoals) = pure ([], subgoals)
-    joinSubgoals subgoals = do
-      renamedLHS <- freshRel
-      renamedRHS <- freshRel
-      joined <- freshRel
-      pure ( [ Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))
-             , Assignment (TAC renamedRHS (Rename permutationRHS rhsRel))
-             , Assignment (TAC joined (Join (fromIntegral joinSize)
-                                       renamedLHS renamedRHS))
-             ]
-           , (Relation joined (Right <$> joinedParams), NotNegated)
-             : deleteAt lhs (deleteAt rhs subgoals)
-           )
-      where
-        variableUsedIn :: Map Var (Set SubgoalIndex)
-        variableUsedIn =
-          Map.fromListWith Set.union
-          $ concatMap
-            (\(ix, (Relation _ vars, _)) -> map (, Set.singleton ix)
-                                            (catVars (rights vars)))
-          $ zip [0..] subgoals
+needsJoin :: [Expr rel Name] -> Bool
+needsJoin = any (> 1) . Map.fromListWith (+) . map (, 1) . rights . concatMap (relArguments . fst)
 
-        joinPairs :: Map (SubgoalIndex, SubgoalIndex) (Set Var)
-        joinPairs =
-          Map.fromListWith Set.union
-          $ concatMap (\(var, ps) -> (, Set.singleton var) <$> Set.toList ps)
-          $ Map.toList (pairsOf <$> variableUsedIn)
+-- TODO: lhs/rhs of join should be based on minimising renaming
+--       could increase total amount of renaming but this is probably a good
+--       greedy heuristic to adopt
+joinSubgoals :: (MonadTAC rel m, Show rel) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
+joinSubgoals subgoals | not (needsJoin subgoals) = pure ([], subgoals)
+joinSubgoals subgoals = do
+  renamedLHS <- freshRel
+  renamedRHS <- freshRel
+  joined <- freshRel
+  pure ( [ Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))
+         , Assignment (TAC renamedRHS (Rename permutationRHS rhsRel))
+         , Assignment (TAC joined (Join (fromIntegral joinSize)
+                                   renamedLHS renamedRHS))
+         ]
+       , (Relation joined (Right <$> joinedParams), NotNegated)
+         : deleteAt lhs (deleteAt rhs subgoals)
+       )
+  where
+    variableUsedIn :: Map Var (Set SubgoalIndex)
+    variableUsedIn =
+      Map.fromListWith Set.union
+      $ concatMap
+        (\(ix, (Relation _ vars, _)) -> map (, Set.singleton ix)
+                                        (catVars (rights vars)))
+      $ zip [0..] subgoals
 
-        lhs, rhs :: SubgoalIndex
-        joinVars :: Set Var
-        ((lhs, rhs), joinVars) = Extra.maximumOn (Set.size . snd)
-                                 $ Map.toList joinPairs
+    joinPairs :: Map (SubgoalIndex, SubgoalIndex) (Set Var)
+    joinPairs =
+      Map.fromListWith Set.union
+      $ concatMap (\(var, ps) -> (, Set.singleton var) <$> Set.toList ps)
+      $ Map.toList (pairsOf <$> variableUsedIn)
 
-        Relation lhsRel lhsVars = fst (subgoals !! lhs)
-        Relation rhsRel rhsVars = fst (subgoals !! rhs)
+    lhs, rhs :: SubgoalIndex
+    joinVars :: Set Var
+    ((lhs, rhs), joinVars) = Extra.maximumOn (Set.size . snd)
+                             $ Map.toList joinPairs
 
-        joinSize = Set.size joinVars
+    Relation lhsRel lhsVars = fst (subgoals !! lhs)
+    Relation rhsRel rhsVars = fst (subgoals !! rhs)
 
-        permutationLHS, permutationRHS :: AttrPermutation
-        permutationLHS =
-          let names = rights lhsVars
-              joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
-                            $ toList joinVars
-              notJoinIndices = map fst
-                               $ filter (not . (`Set.member` joinVars) . snd)
-                               $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
-                               $ zip [0..] names
-          in notJoinIndices ++ joinIndices
-        permutationRHS =
-          let names = rights rhsVars
-              joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
-                            $ toList joinVars
-              notJoinIndices = map fst
-                               $ filter (not . (`Set.member` joinVars) . snd)
-                               $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
-                               $ zip [0..] names
-          in joinIndices ++ notJoinIndices
+    joinSize = Set.size joinVars
 
-        unsafeElemIndex :: Eq a => a -> [a] -> Int
-        unsafeElemIndex el xs = fromMaybe undefined -- FIXME
-                                (List.elemIndex el xs)
+    permutationLHS, permutationRHS :: AttrPermutation
+    permutationLHS =
+      let names = rights lhsVars
+          joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
+                        $ toList joinVars
+          notJoinIndices = map fst
+                           $ filter (not . (`Set.member` joinVars) . snd)
+                           $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
+                           $ zip [0..] names
+      in notJoinIndices ++ joinIndices
+    permutationRHS =
+      let names = rights rhsVars
+          joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
+                        $ toList joinVars
+          notJoinIndices = map fst
+                           $ filter (not . (`Set.member` joinVars) . snd)
+                           $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
+                           $ zip [0..] names
+      in joinIndices ++ notJoinIndices
 
-        joinedParams :: [Name]
-        joinedParams =
-          applyPermutation permutationLHS (rights lhsVars)
-          ++ drop joinSize (applyPermutation permutationRHS (rights rhsVars))
+    unsafeElemIndex :: Eq a => a -> [a] -> Int
+    unsafeElemIndex el xs = fromMaybe undefined -- FIXME
+                            (List.elemIndex el xs)
 
-    needsJoin :: [Expr rel Name] -> Bool
-    needsJoin = undefined -- FIXME
+    joinedParams :: [Name]
+    joinedParams =
+      applyPermutation permutationLHS (rights lhsVars)
+      ++ drop joinSize (applyPermutation permutationRHS (rights rhsVars))
 
 applyPermutation :: AttrPermutation -> [a] -> [a]
-applyPermutation = undefined
+applyPermutation perm xs = map (xs !!) perm
 
 pairsOf :: (Ord a) => Set a -> Set (a, a)
 pairsOf vals = Set.fromList

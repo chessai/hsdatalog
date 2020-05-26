@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 module Datalog
   ( main
   ) where
@@ -26,7 +28,7 @@ main = do
   case parseProgram progFile progCode of
     Left err -> putStrLn err
     Right prog -> do
-      putStrLn "Input program:"
+{-      putStrLn "Input program:"
       printProgram prog
       putStrLn ""
 
@@ -45,6 +47,19 @@ main = do
       putStrLn "Parity Stratification Check: "
       putStrLn $ pretty $ parityStratifyCheck prog
       putStrLn ""
+-}
+      let (stmts, exprs) = runTacM $ do
+            (stmts0, exprs0) <- joinSubgoals
+              $ map ((, NotNegated) . fmap ElaborationName)
+                [ Relation 20 [Right (Just 9), Right (Just 6), Right (Just 7)]
+                , Relation 21 [Right (Just 8), Right (Just 7), Right (Just 9)]
+                , Relation 22 [Right (Just 6)]
+                ]
+            (stmts1, exprs1) <- joinSubgoals exprs0
+            pure (stmts0 ++ stmts1, exprs1)
+
+      mapM_ (putStrLn . pretty) stmts
+      mapM_ (putStrLn . prettyExpr) exprs
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do
