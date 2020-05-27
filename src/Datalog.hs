@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections    #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Datalog
   ( main
@@ -7,8 +8,10 @@ module Datalog
 import Control.Monad.Reader (ReaderT, runReaderT)
 import Control.Monad.Reader.Class (MonadReader)
 import Control.Monad.ST (ST, runST, stToIO)
+import Control.Monad.Trans.Writer.CPS (runWriterT)
 import Data.Foldable (foldl', foldlM)
 import Data.Map.Strict (Map)
+import Data.Tuple (swap)
 import Data.Void (Void)
 import Datalog.Cudd (CuddT, DDNode)
 import Datalog.CycleEnumeration
@@ -60,13 +63,14 @@ main = do
             pure (stmts0 ++ stmts1, exprs1)
 -}
 
-      let (stmts, exprs) = runTacM $ do
-            (stmts0, exprs0) <- selectConstants
+      let (exprs, stmts) = runTacM $ do
+            (exprs0, stmts0) <- runWriterT $ selectConstants
+              $ id @[Expr Int Name]
               $ map ((, NotNegated) . fmap ElaborationName)
                 [ Relation 20 [Left (ConstantInt 3), Right (Just 6), Left (ConstantBitString [True,True,True,False])]
                 , Relation 22 [Right (Just 6)]
                 ]
-            pure (stmts0, exprs0)
+            pure (exprs0, stmts0)
 
       mapM_ (putStrLn . pretty) stmts
       mapM_ (putStrLn . prettyExpr) exprs

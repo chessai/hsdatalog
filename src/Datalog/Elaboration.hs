@@ -1,4 +1,6 @@
 {-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
@@ -12,6 +14,8 @@ module Datalog.Elaboration where
 import Control.Monad
 import Control.Monad.State.Class (get, modify, put)
 import Control.Monad.State.Strict (State, evalState)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Writer.CPS (WriterT, runWriterT, tell)
 import Data.Bifunctor (Bifunctor, bimap, first, second)
 import Data.Either
 import Data.Foldable (foldlM, toList)
@@ -75,7 +79,7 @@ data Statement rel
   | Assignment (TAC rel)
   deriving stock (Eq, Ord, Show)
 
-class Monad m => MonadTAC rel m | m -> rel where
+class Monad m => MonadTAC rel m where
   freshRel :: m rel
 
 type Rel = Int
@@ -91,6 +95,9 @@ instance MonadTAC Rel TacM where
     result <- get
     modify (+1)
     pure result
+
+instance (MonadTAC rel m) => MonadTAC rel (WriterT w m) where
+  freshRel = lift freshRel
 
 -- First, construct a map whose keys are the names of relations in the subgoals
 -- of a rule, and whose values are the set of variables used in those relations.
@@ -153,12 +160,12 @@ programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
 
 -- | For each subgoal with a constant, use the select and project operators to
 --   restrict the relation to match the constant.
-selectConstants :: forall m rel. (MonadTAC rel m) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
-selectConstants subgoals = (bimap concat (flip zip (map snd subgoals)) . unzip)
+selectConstants :: forall m rel. (MonadTAC rel m) => [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
+selectConstants subgoals = flip zip (map snd subgoals)
                            <$> traverse (go . fst) subgoals
   where
-    go :: Relation rel Name -> m ([Statement rel], Relation rel Name)
-    go (Relation rel args) | all isRight args = pure ([], Relation rel args)
+    go :: Relation rel Name -> WriterT [Statement rel] m (Relation rel Name)
+    go (Relation rel args) | all isRight args = pure (Relation rel args)
     go (Relation rel args) = do
       let constants :: [(Int, Constant)]
           constants = rights $ map (sequenceA . fmap flipEither) $ zip [0..] args
@@ -168,11 +175,11 @@ selectConstants subgoals = (bimap concat (flip zip (map snd subgoals)) . unzip)
                              (rel : init rels)
                              rels
                              constants
+      tell selects
       projectRel <- freshRel
-      let project :: Statement rel
-          project = Assignment (TAC projectRel (Project (List.findIndices isRight args) (last rels)))
+      tell [Assignment (TAC projectRel (Project (List.findIndices isRight args) (last rels)))]
 
-      pure (selects ++ [project], Relation projectRel (filter isRight args))
+      pure (Relation projectRel (filter isRight args))
 
 flipEither :: Either a b -> Either b a
 flipEither = either Right Left
@@ -193,20 +200,19 @@ hasConstant = any isLeft . relArguments
 -- TODO: lhs/rhs of join should be based on minimising renaming
 --       could increase total amount of renaming but this is probably a good
 --       greedy heuristic to adopt
-joinSubgoals :: (MonadTAC rel m) => [Expr rel Name] -> m ([Statement rel], [Expr rel Name])
-joinSubgoals subgoals | not (needsJoin subgoals) = pure ([], subgoals)
+joinSubgoals :: (MonadTAC rel m) => [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
+joinSubgoals subgoals | not (needsJoin subgoals) = pure subgoals
 joinSubgoals subgoals = do
   renamedLHS <- freshRel
+  tell [Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))]
   renamedRHS <- freshRel
+  tell [Assignment (TAC renamedRHS (Rename permutationRHS rhsRel))]
   joined <- freshRel
-  pure ( [ Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))
-         , Assignment (TAC renamedRHS (Rename permutationRHS rhsRel))
-         , Assignment (TAC joined (Join (fromIntegral joinSize)
-                                   renamedLHS renamedRHS))
-         ]
-       , (Relation joined (Right <$> joinedParams), NotNegated)
-         : deleteAt lhs (deleteAt rhs subgoals)
-       )
+  tell [Assignment (TAC joined (Join (fromIntegral joinSize)
+                                renamedLHS renamedRHS))]
+
+  pure ((Relation joined (Right <$> joinedParams), NotNegated)
+        : deleteAt lhs (deleteAt rhs subgoals))
   where
     variableUsedIn :: Map Var (Set SubgoalIndex)
     variableUsedIn =
