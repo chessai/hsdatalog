@@ -7,14 +7,16 @@ with {
   sha256 = "0bn2mqfbc6ss7rsaqzplw70dhk512ldgpr5qqzxlllaa0m2m91xn";
 
   config = {
+    allowBroken = true;
     packageOverrides = super: let self = super.pkgs; in rec {
       cudd = self.callPackage ./cudd {};
 
       haskellPackages = super.haskell.packages."${compiler}".override {
         overrides = hself: hsuper: with super.haskell.lib; rec {
-          cudd = unmarkBroken (hsuper.cudd.override { cudd = self.cudd; });
+          cudd = hsuper.cudd.override { cudd = self.cudd; };
           vector-circular = hself.callPackage ./vector-circular.nix {};
           hedgehog-classes = doJailbreak (unmarkBroken hsuper.hedgehog-classes);
+          streaming-cassava = dontCheck hsuper.streaming-cassava;
         };
       };
     };

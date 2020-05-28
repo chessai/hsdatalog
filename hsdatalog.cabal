@@ -28,6 +28,7 @@ common shared-properties
   build-depends:
     , base
     , containers
+    , datasets
     , extra
     , generic-lens >= 2.0.0.0
     , ilist
@@ -50,6 +51,7 @@ library
     Datalog.CycleEnumeration
     Datalog.Elaboration
     Datalog.Graph
+    Datalog.ID3
     Datalog.Pretty
     Datalog.RelAlgebra
     Datalog.Stratification
