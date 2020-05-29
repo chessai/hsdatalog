@@ -69,16 +69,6 @@ removeSubgoalDuplication = fmap (,0)
       undefined
 -}
 
-data TAC rel
-  = TAC rel (RelAlgebra rel)
-  deriving stock (Eq, Ord, Show)
-
-data Statement rel
-  = While rel (Statement rel)
-  | Block [Statement rel]
-  | Assignment (TAC rel)
-  deriving stock (Eq, Ord, Show)
-
 class Monad m => MonadTAC rel m where
   freshRel :: m rel
 

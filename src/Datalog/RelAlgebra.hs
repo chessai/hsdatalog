@@ -1,12 +1,20 @@
-{-# LANGUAGE DeriveFoldable     #-}
-{-# LANGUAGE DeriveFunctor      #-}
-{-# LANGUAGE DeriveTraversable  #-}
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveFoldable      #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveTraversable   #-}
+{-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Datalog.RelAlgebra where
 
+import Control.Monad
+import Control.Monad.State.Class (get, modify, put)
+import Control.Monad.State.Strict (State)
+import Data.Map.Strict (Map)
+import Data.Set (Set)
 import Datalog.Syntax
 import Numeric.Natural
+
+import qualified Data.Map.Strict as Map
 
 type Attr = Int
 
@@ -46,3 +54,36 @@ interpret tacs m = foldlM (flip (uncurry go)) m tacs
       Difference a b -> Cudd.and a =<< Cudd.not b
       Select attr c rel -> undefined
 -}
+
+data TAC rel
+  = TAC rel (RelAlgebra rel)
+  deriving stock (Eq, Ord, Show)
+
+data Statement rel
+  = While rel (Statement rel)
+  | Block [Statement rel]
+  | Assignment (TAC rel)
+  deriving stock (Eq, Ord, Show)
+
+newtype Tuple = Tuple [Constant]  deriving (Eq, Ord, Show)
+newtype Table = Table (Set Tuple) deriving (Eq, Ord, Show)
+
+emptyTable :: Table
+emptyTable = Table mempty
+
+referenceInterpreter
+  :: forall rel
+  .  (Ord rel)
+  => Statement rel
+  -> State (Map rel Table) ()
+referenceInterpreter (While rel stmt) = do
+  before <- Map.findWithDefault emptyTable rel <$> get
+  referenceInterpreter stmt
+  after <- Map.findWithDefault emptyTable rel <$> get
+  when (before /= after) $ referenceInterpreter (While rel stmt)
+referenceInterpreter (Block stmts) = mapM_ referenceInterpreter stmts
+referenceInterpreter (Assignment (TAC lhs rhs)) = do
+  state <- get
+  let go :: RelAlgebra rel -> Table
+      go = undefined
+  modify (Map.insert lhs (go rhs))
