@@ -62,7 +62,7 @@ data TAC rel
   deriving stock (Eq, Ord, Show, Generic)
 
 data Statement rel
-  = While rel (Statement rel)
+  = While [rel] (Statement rel)
   | Block [Statement rel]
   | Assignment (TAC rel)
   deriving stock (Eq, Ord, Show, Generic)
@@ -78,11 +78,11 @@ referenceInterpreter
   .  (Ord rel)
   => Statement rel
   -> State (Map rel Table) ()
-referenceInterpreter (While rel stmt) = do
-  before <- Map.findWithDefault emptyTable rel <$> get
+referenceInterpreter (While rels stmt) = do
+  before <- (\m -> map (flip (Map.findWithDefault emptyTable) m) rels) <$> get
   referenceInterpreter stmt
-  after <- Map.findWithDefault emptyTable rel <$> get
-  when (before /= after) $ referenceInterpreter (While rel stmt)
+  after <- (\m -> map (flip (Map.findWithDefault emptyTable) m) rels) <$> get
+  when (before /= after) $ referenceInterpreter (While rels stmt)
 referenceInterpreter (Block stmts) = mapM_ referenceInterpreter stmts
 referenceInterpreter (Assignment (TAC lhs rhs)) = do
   state <- get
