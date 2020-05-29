@@ -88,6 +88,8 @@ programToStatement (Program ds _) = fmap (Block . concat) (traverse go ds)
 
 --------------------------------------------------------------------------------
 
+-- TODO: I think this function is probably unnecessary, we should preserve
+-- ParseNames for as long as we possibly can.
 renameProgram
   :: forall rel var. (Ord var) => Program rel var -> Program rel Name
 renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
@@ -116,27 +118,27 @@ removeSubgoalDuplication (Rule _ ss) = impl ss
       let allVars :: Map Name Int
           allVars = Map.fromListWith (+) (zip (toList (fst subgoal)) (repeat 1))
       names <- traverse (`replicateM` freshVar) allVars
+
       let mkEquality (x, y) = do
             rel <- eqRel
             pure (Relation rel [Right x, Right y], NotNegated)
       equalities <- traverse mkEquality (concatMap sequenceA (Map.toList names))
+
+      let modifyName :: Name -> State (Map Name Int) Name
+          modifyName n = do
+            if Map.findWithDefault 0 n allVars == 0
+              then pure n
+              else do
+                s <- get
+                let failure = error "modifyNames: encountered unseen name"
+                let ns = Map.findWithDefault failure n names
+                modify (Map.alter (Just . (+ 1) . fromMaybe 0) n)
+                pure (ns !! Map.findWithDefault 0 n s)
       let modifyNames :: [Name] -> [Name]
           modifyNames = flip evalState Map.empty . traverse modifyName
-            where
-              modifyName :: Name -> State (Map Name Int) Name
-              modifyName n = do
-                let numUsages = Map.findWithDefault 0 n allVars
-                if numUsages == 0
-                  then pure n
-                  else do
-                    s <- get
-                    let failure = error "modifyNames: encountered unseen name"
-                    let ns = Map.findWithDefault failure n names
-                    modify (Map.alter (Just . (+ 1) . fromMaybe 0) n)
-                    pure (ns !! Map.findWithDefault 0 n s)
-
       let subgoal' :: Expr rel Name
           subgoal' = subgoal & temparts %~ modifyNames
+
       ((subgoal' : equalities) ++) <$> impl subgoals
 
 --------------------------------------------------------------------------------
