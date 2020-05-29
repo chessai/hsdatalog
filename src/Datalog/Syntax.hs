@@ -1,5 +1,7 @@
+{-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE DeriveFoldable      #-}
 {-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DerivingStrategies  #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
@@ -23,11 +25,13 @@ import Control.Monad
 import Control.Monad.State.Class (get, modify, put)
 import Control.Monad.State.Strict (State, evalState, execState)
 import Data.Bifunctor (Bifunctor, bimap, first)
+import Data.Data (Data)
 import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Set (Set)
 import Data.Void (Void)
+import GHC.Generics (Generic)
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 
@@ -43,23 +47,23 @@ type Var = Int
 data Name
   = ParseName (Maybe String)
   | ElaborationName (Maybe Var)
-   deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic, Data)
 
 data Constant
   = ConstantInt Int
   | ConstantBool Bool
   | ConstantBitString [Bool]
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic, Data)
 
 data Relation rel var = Relation
   { relRelation :: rel
   , relArguments :: [Either Constant var]
   }
-  deriving stock (Eq, Show)
-  deriving stock (Functor, Foldable)
+  deriving stock (Eq, Show, Generic)
+  deriving stock (Functor, Foldable, Data)
 
 data Negated = Negated | NotNegated
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show, Generic, Data)
 
 isNotNegated :: Negated -> Bool
 isNotNegated Negated = False
@@ -70,14 +74,14 @@ type Expr rel var = (Relation rel var, Negated)
 data Declaration rel var
   = Rule (Relation rel var) [Expr rel var]
     -- ^ rulename_lhs(var1, var2) :- rulename_rhs1(vars...), rulename_rhs2(vars...), ..., rulename_rhsN(vars...).
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Show, Generic, Data)
   deriving stock (Functor, Foldable)
 
 data Program rel var = Program
   { decls :: [Declaration rel var]
   , types :: Map rel Type
   }
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Show, Generic, Data)
   deriving stock (Functor, Foldable)
 
 -- TODO: expand this
@@ -92,7 +96,7 @@ data Type
     -- ^ used during type inference
   | TypeRelation [Type]
     -- ^ top level type signature
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Show, Generic, Data)
 
 --------------------------------------------------------
 

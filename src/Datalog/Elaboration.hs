@@ -7,23 +7,31 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Datalog.Elaboration where
 
+import Control.Lens
+import Control.Lens.Plated
 import Control.Monad
 import Control.Monad.State.Class (get, modify, put)
 import Control.Monad.State.Strict (State, evalState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.CPS (WriterT, runWriterT, tell)
 import Data.Bifunctor (Bifunctor, bimap, first, second)
+import Data.Data (Data)
+import Data.Data.Lens
 import Data.Either
 import Data.Foldable (foldlM, toList)
 import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Set (Set)
+import Data.Typeable (Typeable)
 import Datalog.RelAlgebra
 import Datalog.Syntax
+import GHC.Generics (Generic (..))
 
 import qualified Data.List as List
 import qualified Data.List.Extra as Extra
@@ -32,13 +40,8 @@ import qualified Data.Set as Set
 
 import Debug.Trace
 
-used :: (Foldable t, Ord var) => t var -> ([var], [var])
-used d =
-  let allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))
-  in mapBoth (map fst) (List.partition ((== 1) . snd) allVars)
-
 renameProgram :: forall rel var. (Ord var) => Program rel var -> Program rel Name
-renameProgram = normaliseRules . removeSubgoalDuplication
+renameProgram = normaliseRules -- . removeSubgoalDuplication
 
 normaliseRules :: forall rel var. (Ord var) => Program rel var -> Program rel Name
 normaliseRules (Program decls types) = Program (flip evalState 0 (traverse go decls)) types
@@ -51,43 +54,40 @@ normaliseRules (Program decls types) = Program (flip evalState 0 (traverse go de
       modify (+ length usedMany)
       pure (fmap (ElaborationName . (renamings Map.!)) d)
 
--- FIXME: make this do its damn JOB!
-removeSubgoalDuplication :: forall rel var. (Ord var) => Program rel var -> Program rel (var, Int)
-removeSubgoalDuplication = fmap (,0)
-{-
-  map go
-  where
-    go :: Declaration rel var -> Declaration rel (var, Int)
-    go (Rule relH exprs) = Rule ((,0) <$> relH) (concat (evalState (traverse foo exprs) 1))
-      --let (usedOnce, usedMany) = used exprs
-      --in undefined
-
-    foo :: Expr rel var -> State Int [Expr rel (var, Int)]
-    foo (Relation rel vars, b) = do
-      let (usedOnce, usedMany) = used vars
-      n <- get
-      undefined
--}
-
-class Monad m => MonadTAC rel m where
+class Monad m => MonadTAC rel m | m -> rel where
   freshRel :: m rel
 
-type Rel = Int
+  freshVar :: m Name
 
-newtype TacM a = TacM (State Int a)
+  eqRel :: m rel
+
+data Rel = EqualityConstraint | Rel Int
+
+newtype TacM a = TacM (State (Int, Int) a)
   deriving newtype (Functor, Applicative, Monad)
 
 runTacM :: TacM a -> a
-runTacM (TacM action) = evalState action 0
+runTacM (TacM action) = evalState action (0, 0)
 
 instance MonadTAC Rel TacM where
   freshRel = TacM $ do
-    result <- get
-    modify (+1)
-    pure result
+    result <- fst <$> get
+    modify (first (+1))
+    pure (Rel result)
+
+  freshVar = TacM $ do
+    result <- snd <$> get
+    modify (second (+1))
+    pure (ElaborationName (Just result))
+
+  eqRel = pure EqualityConstraint
 
 instance (MonadTAC rel m) => MonadTAC rel (WriterT w m) where
   freshRel = lift freshRel
+
+  freshVar = lift freshVar
+
+  eqRel = lift eqRel
 
 -- First, construct a map whose keys are the names of relations in the subgoals
 -- of a rule, and whose values are the set of variables used in those relations.
@@ -129,30 +129,78 @@ programToStatement
 programToStatement (Program decls _) = fmap (Block . concat) (traverse go decls)
   where
     go :: Declaration rel Name -> m [Statement rel]
-    -- For each subgoal with an underscore, project away its unused attributes
-    go (Rule relH exprs) | any isNameUnused (concatMap (toList . fst) exprs) = do
-      (statements, exprs') <- (bimap concat (flip zip (map snd exprs)) . unzip)
-                              <$> traverse (projectUnused . fst) exprs
-      (statements ++) <$> go (Rule relH exprs')
-      -- FIXME: wrong because we need two different namespaces for
-      -- compiler-generated vs parsed names
-    go decl = error (show decl)
+    go = undefined
 
-    projectUnused :: Relation rel Name -> m ([Statement rel], Relation rel Name)
-    projectUnused (Relation rel vars)
-      | all (not . isUnused) vars = pure ([], Relation rel vars)
+removeSubgoalDuplication :: forall m rel. (Data rel, MonadTAC rel m) => Declaration rel Name -> WriterT [Statement rel] m [Expr rel Name]
+removeSubgoalDuplication (Rule relH ss) = impl ss
+  where
+    impl :: [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
+    impl [] = pure []
+    impl (subgoal : subgoals) = do
+      let allVars :: Map Name Int
+          allVars = Map.fromListWith (+) (zip (toList (fst subgoal)) (repeat 1))
+      let uses :: Map Int [Name]
+          uses = Map.fromListWith (++) (map (\(var, i) -> (i, [var])) (Map.toAscList allVars))
+
+      names <- traverse (\i -> replicateM i freshVar) allVars
+      let mkEquality (x,y) = do
+            rel <- eqRel
+            pure (Relation rel [Right x,Right y], NotNegated)
+      equalities <- traverse mkEquality (concatMap sequenceA (Map.toList names))
+      let modifyNames :: [Name] -> [Name]
+          modifyNames = flip evalState Map.empty . traverse modifyName
+            where
+              modifyName :: Name -> State (Map Name Int) Name
+              modifyName n = do
+                let numUsages = Map.findWithDefault 0 n allVars
+                if numUsages == 0
+                  then pure n
+                  else do
+                    s <- get
+                    let failure = error "modifyNames: encountered name we haven't seen before"
+                    let ns = Map.findWithDefault failure n names
+                    modify (Map.alter (Just . maybe 1 (+1)) n)
+                    pure (ns !! (Map.findWithDefault 0 n s))
+
+      let subgoal' :: Expr rel Name
+          subgoal' = subgoal & temParts @_ @Name %~ modifyNames
+      ((subgoal' : equalities) ++) <$> impl subgoals
+
+temParts :: forall s a. (Data s, Typeable a) => Lens' s [a]
+temParts = unsafePartsOf template
+
+removeUnused :: (Monad m) => Declaration rel Name -> WriterT [Statement rel] m [Expr rel Name]
+removeUnused d@(Rule relH subgoals) = do
+  let allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))
+  let usedOnce = map fst (filter ((== 1) . snd) allVars)
+  let rename n = case n of
+        ParseName _ -> (n, ParseName Nothing)
+        ElaborationName _ -> (n, ElaborationName Nothing)
+  let renamings = Map.fromList (map rename usedOnce)
+  pure (map (first (fmap (renamings Map.!))) subgoals)
+
+-- For each subgoal with an underscore, project away its unused attributes
+projectUnused :: forall m rel. (MonadTAC rel m) => Declaration rel Name -> WriterT [Statement rel] m [Expr rel Name]
+projectUnused (Rule relH subgoals)
+  | any isNameUnused (concatMap (toList . fst) subgoals)
+  = flip zip (map snd subgoals) <$> traverse (go . fst) subgoals
+  | otherwise
+  = pure subgoals
+  where
+    go :: Relation rel Name -> WriterT [Statement rel] m (Relation rel Name)
+    go (Relation rel vars)
+      | all (not . isUnused) vars = pure (Relation rel vars)
       | otherwise = do
           let positions = List.findIndices (not . isUnused) vars
           rel' <- freshRel
-          pure ( [Assignment (TAC rel' (Project positions rel))]
-               , Relation rel' (filter (not . isUnused) vars)
-               )
+          tell [Assignment (TAC rel' (Project positions rel))]
+          pure (Relation rel' (filter (not . isUnused) vars))
 
 -- | For each subgoal with a constant, use the select and project operators to
 --   restrict the relation to match the constant.
-selectConstants :: forall m rel. (MonadTAC rel m) => [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
-selectConstants subgoals = flip zip (map snd subgoals)
-                           <$> traverse (go . fst) subgoals
+selectConstants :: forall m rel. (MonadTAC rel m) => Declaration rel Name -> WriterT [Statement rel] m [Expr rel Name]
+selectConstants (Rule _ subgoals) = flip zip (map snd subgoals)
+                                    <$> traverse (go . fst) subgoals
   where
     go :: Relation rel Name -> WriterT [Statement rel] m (Relation rel Name)
     go (Relation rel args) | all isRight args = pure (Relation rel args)
@@ -174,13 +222,6 @@ selectConstants subgoals = flip zip (map snd subgoals)
 flipEither :: Either a b -> Either b a
 flipEither = either Right Left
 
---data Relation rel var = Relation
---  { relRelation :: rel
---  , relArguments :: [Either Constant var]
---  }
-
--- Select Attr Constant rel
-
 hasConstant :: Relation rel var -> Bool
 hasConstant = any isLeft . relArguments
 
@@ -190,9 +231,9 @@ hasConstant = any isLeft . relArguments
 -- TODO: lhs/rhs of join should be based on minimising renaming
 --       could increase total amount of renaming but this is probably a good
 --       greedy heuristic to adopt
-joinSubgoals :: (MonadTAC rel m) => [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
-joinSubgoals subgoals | not (needsJoin subgoals) = pure subgoals
-joinSubgoals subgoals = do
+joinSubgoals :: (MonadTAC rel m) => Declaration rel Name -> WriterT [Statement rel] m [Expr rel Name]
+joinSubgoals (Rule _ subgoals) | not (needsJoin subgoals) = pure subgoals
+joinSubgoals (Rule _ subgoals) = do
   renamedLHS <- freshRel
   tell [Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))]
   renamedRHS <- freshRel
@@ -281,3 +322,14 @@ isUnused = either (const False) isNameUnused
 
 mapBoth :: Bifunctor f => (a -> b) -> f a a -> f b b
 mapBoth f = bimap f f
+
+used :: (Foldable t, Ord var) => t var -> ([var], [var])
+used d =
+  let allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))
+  in mapBoth (map fst) (List.partition ((== 1) . snd) allVars)
+
+used' :: (Foldable t, Ord var) => t var -> Map Int [var]
+used' d =
+  let allVars = map (\(var, i) -> (i, [var])) (Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1))))
+  in Map.fromListWith (++) allVars
+

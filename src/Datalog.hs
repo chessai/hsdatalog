@@ -61,7 +61,6 @@ main = do
                 ]
             (stmts1, exprs1) <- joinSubgoals exprs0
             pure (stmts0 ++ stmts1, exprs1)
--}
 
       let (exprs, stmts) = runTacM $ do
             (exprs0, stmts0) <- runWriterT $ selectConstants
@@ -74,6 +73,8 @@ main = do
 
       mapM_ (putStrLn . pretty) stmts
       mapM_ (putStrLn . prettyExpr) exprs
+-}
+      pure ()
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

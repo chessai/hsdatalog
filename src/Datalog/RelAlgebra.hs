@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFoldable      #-}
 {-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DeriveTraversable   #-}
 {-# LANGUAGE DerivingStrategies  #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -12,6 +13,7 @@ import Control.Monad.State.Strict (State)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Datalog.Syntax
+import GHC.Generics (Generic)
 import Numeric.Natural
 
 import qualified Data.Map.Strict as Map
@@ -28,7 +30,7 @@ data RelAlgebra rel
   | Rename AttrPermutation rel
   | Difference rel rel
   | Select Attr Constant rel -- Int constants are all we have right now
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
   deriving stock (Functor, Foldable, Traversable)
 
 {-
@@ -57,13 +59,13 @@ interpret tacs m = foldlM (flip (uncurry go)) m tacs
 
 data TAC rel
   = TAC rel (RelAlgebra rel)
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
 
 data Statement rel
   = While rel (Statement rel)
   | Block [Statement rel]
   | Assignment (TAC rel)
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
 
 newtype Tuple = Tuple [Constant]  deriving (Eq, Ord, Show)
 newtype Table = Table (Set Tuple) deriving (Eq, Ord, Show)
