@@ -8,6 +8,7 @@ import Data.List (intercalate)
 import Data.Maybe
 import Data.Text (Text)
 import Datalog.Elaboration
+import Datalog.Graph
 import Datalog.RelAlgebra
 import Datalog.Syntax
 import Datalog.TypeCheck
@@ -83,6 +84,11 @@ prettyExpr (rel, negated) = bool "!" "" (isNotNegated negated) ++ pretty rel
 
 prettyType :: (Pretty name) => name -> Type -> String
 prettyType name typ = pretty name ++ " : " ++ pretty typ ++ "."
+
+prettyGraph :: (Pretty node, Pretty weight) => Graph node weight -> String
+prettyGraph = unlines . map go . edges
+  where
+    go (source, target, weight) = pretty source ++ " -> " ++ pretty target ++ "; [" ++ pretty weight ++ "]"
 
 showSubscript :: (Integral a, Show a) => a -> String
 showSubscript = map toSubscript . show

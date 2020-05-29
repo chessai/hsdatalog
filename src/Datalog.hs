@@ -83,7 +83,3 @@ printProgram prog = do
   putStrLn "Types:"
   mapM_ (putStrLn . uncurry prettyType) (Map.toList (types prog))
 
-prettyGraph :: (Pretty node, Pretty weight) => Graph node weight -> String
-prettyGraph = unlines . map go . edges
-  where
-    go (source, target, weight) = pretty source ++ " -> " ++ pretty target ++ "; [" ++ pretty weight ++ "]"
