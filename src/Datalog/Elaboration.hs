@@ -143,6 +143,23 @@ removeSubgoalDuplication (Rule _ ss) = impl ss
 
 --------------------------------------------------------------------------------
 
+-- | Eliminate all uses of negation from the given 'Declaration'.
+eliminateNegation
+  :: forall m rel
+  .  (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m [Expr rel Name]
+eliminateNegation (Rule _ subgoals) = traverse go subgoals
+  where
+    go :: Expr rel Name -> WriterT [Statement rel] m (Expr rel Name)
+    go (relation, NotNegated) = pure (relation, NotNegated)
+    go (Relation rel args, Negated) = do
+      nrel <- freshRel
+      tell [Assignment (TAC nrel (Not rel))]
+      pure (Relation nrel args, NotNegated)
+
+--------------------------------------------------------------------------------
+
 -- | Replace variable names that are only used once with 'Nothing'.
 removeUnused
   :: (Monad m)
