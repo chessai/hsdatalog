@@ -4,41 +4,48 @@ name:
 version:
   0.1
 synopsis:
-  datalog
--- description:
--- bug-reports:
--- license:
--- license-file:        LICENSE
+  BDD-based implementation of Datalog
+description:
+  A compiler from Datalog to relational algebra, as well as an interpreter for relational algebra
+  that uses binary decision diagrams (BDDs).
+bug-reports:
+  https://github.com/chessai/hsdatalog/issues
+license:
+  Apache-2.0
+license-file:
+  LICENSE
 author:
   chessai
   taktoa
 maintainer:
   chessai <chessai1996@gmail.com>
   taktoa <taktoa@gmail.com>
--- copyright:
--- category:
+copyright:
+  Copyright 2020 chessai, Google
+category:
+  Compiler, Database, Logic Programming
 build-type:
   Simple
---extra-source-files:
---  CHANGELOG.md
+extra-source-files:
+  CHANGELOG.md
 
 common shared-properties
   default-language:
     Haskell2010
   build-depends:
-    , base
-    , containers
+    , base >= 4.11 && < 4.15
+    , containers >= 0.5.9 && < 0.7
     , datasets
-    , extra
-    , generic-lens >= 2.0.0.0
-    , ilist
-    , lens
-    , mtl
-    , primitive
-    , safe
-    , text
-    , transformers
-    , vector
+    , extra >= 1.6 && < 1.7
+    , generic-lens >= 2.0 && < 2.1
+    , ilist >= 0.4 && < 0.5
+    , lens >= 4.18 && < 4.20
+    , mtl >= 2.2 && < 2.4
+    , primitive >= 0.6.4 && < 0.8
+    , safe >= 0.3 && < 0.4
+    , text >= 1.2 && < 1.3
+    , transformers >= 0.5.6 && < 0.6
+    , vector >= 0.12 && < 0.13
 
 library
   import:
@@ -58,12 +65,12 @@ library
     Datalog.Syntax
     Datalog.TypeCheck
   build-depends:
-    , cudd
-    , hmatrix
-    , megaparsec
-    , parser-combinators
-    , MonadRandom
-    , vector-circular
+    , cudd >= 0.1 && < 0.2
+    , hmatrix >= 0.20 && < 0.21
+    , megaparsec >= 8.0 && < 8.1
+    , parser-combinators >= 1.2 && < 1.3
+    , MonadRandom >= 0.5 && < 0.6
+    , vector-circular >= 0.1 && < 0.2
 
 test-suite test
   import:
@@ -83,3 +90,8 @@ test-suite test
     , tasty-hedgehog
     , tasty-hunit
 
+source-repository head
+  type:
+    git
+  location:
+    https://github.com/chessai/hsdatalog
