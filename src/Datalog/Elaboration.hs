@@ -1,3 +1,5 @@
+--------------------------------------------------------------------------------
+
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -8,7 +10,11 @@
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
+--------------------------------------------------------------------------------
+
 module Datalog.Elaboration where
+
+--------------------------------------------------------------------------------
 
 import Control.Lens (Lens', (&), (%~), unsafePartsOf)
 import Control.Monad
@@ -33,22 +39,7 @@ import qualified Data.List.Extra as Extra
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-renameProgram
-  :: forall rel var. (Ord var) => Program rel var -> Program rel Name
-renameProgram = normaliseRules -- . removeSubgoalDuplication
-
-normaliseRules
-  :: forall rel var. (Ord var) => Program rel var -> Program rel Name
-normaliseRules (Program ds ts) = Program (evalState (traverse go ds) 0) ts
-  where
-    go :: Declaration rel var -> State Int (Declaration rel Name)
-    go d = do
-      let (usedOnce, usedMany) = used d
-      n <- get
-      let renamings = Map.fromList
-                      (map (,Nothing) usedOnce ++ zip usedMany (Just <$> [n..]))
-      modify (+ length usedMany)
-      pure (fmap (ElaborationName . (renamings Map.!)) d)
+--------------------------------------------------------------------------------
 
 class Monad m => MonadTAC rel m | m -> rel where
   freshRel :: m rel
@@ -81,39 +72,9 @@ instance (MonadTAC rel m) => MonadTAC rel (WriterT w m) where
   freshVar = lift freshVar
   eqRel    = lift eqRel
 
--- First, construct a map whose keys are the names of relations in the subgoals
--- of a rule, and whose values are the set of variables used in those relations.
---
--- Then, invert it. Now we have a map from variables to the set of relations in
--- which they are used.
---
--- Then, map over the values with a function that enumerates all possible pairs
--- that can be produced from the set. Note that pairs are unordered and must
--- have different elements (i.e. sets of size 2).
---
--- Finally, invert the map again to get a map from pairs of relations to sets of
--- variables. Choose the pair of relations that has the largest number of
--- variables, and join on those variables. Then replace all uses of those two
--- relations in the map in step 2 (if renaming results in a pair that has the
--- same relation twice is, the pair should be removed). Repeat this process
--- until there are no more pairs left.
-
 type SubgoalIndex = Int
 
-isNameUnused :: Name -> Bool
-isNameUnused = \case
-  ParseName       m -> isNothing m
-  ElaborationName m -> isNothing m
-
-getVar :: Name -> Maybe Var
-getVar = \case
-  ParseName       _ -> Nothing
-  ElaborationName m -> m
-
-catVars :: [Name] -> [Var]
-catVars = mapMaybe $ \case
-  ParseName       _ -> Nothing
-  ElaborationName m -> m
+--------------------------------------------------------------------------------
 
 programToStatement
   :: forall m rel
@@ -124,6 +85,23 @@ programToStatement (Program ds _) = fmap (Block . concat) (traverse go ds)
   where
     go :: Declaration rel Name -> m [Statement rel]
     go = undefined
+
+--------------------------------------------------------------------------------
+
+renameProgram
+  :: forall rel var. (Ord var) => Program rel var -> Program rel Name
+renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
+  where
+    go :: Declaration rel var -> State Int (Declaration rel Name)
+    go d = do
+      let (usedOnce, usedMany) = used d
+      n <- get
+      let renamings = Map.fromList
+                      (map (,Nothing) usedOnce ++ zip usedMany (Just <$> [n..]))
+      modify (+ length usedMany)
+      pure (fmap (ElaborationName . (renamings Map.!)) d)
+
+--------------------------------------------------------------------------------
 
 removeSubgoalDuplication
   :: forall m rel
@@ -161,9 +139,9 @@ removeSubgoalDuplication (Rule _ ss) = impl ss
           subgoal' = subgoal & temparts %~ modifyNames
       ((subgoal' : equalities) ++) <$> impl subgoals
 
-temparts :: forall s a. (Data s, Typeable a) => Lens' s [a]
-temparts = unsafePartsOf template
+--------------------------------------------------------------------------------
 
+-- | Replace variable names that are only used once with 'Nothing'.
 removeUnused
   :: (Monad m)
   => Declaration rel Name
@@ -178,7 +156,9 @@ removeUnused d@(Rule _ subgoals) = do
   let renamings = Map.fromList (map rename usedOnce)
   pure (map (first (fmap (renamings Map.!))) subgoals)
 
--- For each subgoal with an underscore, project away its unused attributes
+--------------------------------------------------------------------------------
+
+-- | For each subgoal with an underscore, project away its unused attributes.
 projectUnused
   :: forall m rel
   .  (MonadTAC rel m)
@@ -198,6 +178,8 @@ projectUnused (Rule _ subgoals)
           rel' <- freshRel
           tell [Assignment (TAC rel' (Project positions rel))]
           pure (Relation rel' (filter (not . isUnused) vars))
+
+--------------------------------------------------------------------------------
 
 -- | For each subgoal with a constant, use the select and project operators to
 --   restrict the relation to match the constant.
@@ -231,14 +213,10 @@ selectConstants (Rule _ subgoals) = flip zip (map snd subgoals)
 
       pure (Relation projectRel (filter isRight args))
 
-flipEither :: Either a b -> Either b a
-flipEither = either Right Left
-
-hasConstant :: Relation rel var -> Bool
-hasConstant = any isLeft . relArguments
+--------------------------------------------------------------------------------
 
 -- | Join each subgoal relation with each of the other subgoal relations,
---   projecting away attributes as they become unnecessary
+--   projecting away attributes as they become unnecessary.
 --
 -- TODO: lhs/rhs of join should be based on minimising renaming
 --       could increase total amount of renaming but this is probably a good
@@ -313,6 +291,34 @@ joinSubgoals (Rule _ subgoals) = do
       applyPermutation permutationLHS (rights lhsVars)
       ++ drop joinSize (applyPermutation permutationRHS (rights rhsVars))
 
+--------------------------------------------------------------------------------
+
+isNameUnused :: Name -> Bool
+isNameUnused = \case
+  ParseName       m -> isNothing m
+  ElaborationName m -> isNothing m
+
+getVar :: Name -> Maybe Var
+getVar = \case
+  ParseName       _ -> Nothing
+  ElaborationName m -> m
+
+catVars :: [Name] -> [Var]
+catVars = mapMaybe $ \case
+  ParseName       _ -> Nothing
+  ElaborationName m -> m
+
+--------------------------------------------------------------------------------
+
+temparts :: forall s a. (Data s, Typeable a) => Lens' s [a]
+temparts = unsafePartsOf template
+
+flipEither :: Either a b -> Either b a
+flipEither = either Right Left
+
+hasConstant :: Relation rel var -> Bool
+hasConstant = any isLeft . relArguments
+
 needsJoin :: [Expr rel Name] -> Bool
 needsJoin = any (> 1)
             . Map.fromListWith (+)
@@ -355,3 +361,4 @@ used' d =
                 $ Map.fromListWith (+) (zip (toList d) (repeat 1))
   in Map.fromListWith (++) allVars
 
+--------------------------------------------------------------------------------
