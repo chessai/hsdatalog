@@ -312,6 +312,22 @@ joinSubgoals (Rule _ subgoals) = do
 
 --------------------------------------------------------------------------------
 
+joinEverythingElse
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m [Expr rel Name]
+joinEverythingElse (Rule _ [])     = pure []
+joinEverythingElse (Rule _ [expr]) = pure [expr]
+joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
+  let (Relation relA argsA, _) = exprA
+  let (Relation relB argsB, _) = exprB
+  joined <- freshRel
+  tell [Assignment (TAC joined (Join 0 relA relB))]
+  joinEverythingElse
+    $ Rule relH ((Relation joined (argsA ++ argsB), NotNegated) : rest)
+
+--------------------------------------------------------------------------------
+
 isNameUnused :: Name -> Bool
 isNameUnused = \case
   ParseName       m -> isNothing m
