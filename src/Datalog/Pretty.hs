@@ -7,7 +7,6 @@ import Data.Bool (bool)
 import Data.List (intercalate)
 import Data.Maybe
 import Data.Text (Text)
-import Datalog.Elaboration
 import Datalog.Graph
 import Datalog.RelAlgebra
 import Datalog.Syntax
@@ -83,7 +82,8 @@ instance (Pretty rel) => Pretty (TAC rel) where
 instance Pretty Rel where
   pretty = \case
     EqualityConstraint -> "~"
-    Rel i -> show i
+    ElaborationRel i -> show i
+    ParseRel s -> s
 
 prettyExpr :: (Pretty rel, Pretty var) => Expr rel var -> String
 prettyExpr (rel, negated) = bool "!" "" (isNotNegated negated) ++ pretty rel

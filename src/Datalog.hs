@@ -6,6 +6,7 @@ module Datalog
   ( main
   ) where
 
+import Control.Monad
 import Control.Monad.Reader (ReaderT, runReaderT)
 import Control.Monad.Reader.Class (MonadReader)
 import Control.Monad.ST (ST, runST, stToIO)
@@ -19,11 +20,23 @@ import Datalog.CycleEnumeration
 import Datalog.Elaboration
 import Datalog.Graph
 import Datalog.Pretty
+import Datalog.RelAlgebra
 import Datalog.Stratification
 import Datalog.Syntax
 
 import qualified Data.Map.Strict as Map
 import qualified Datalog.Cudd as Cudd
+
+-- TODO (on the next episode):
+--   - correctly handle facts
+--   - correctly handle situations where a variable is repeated in the head of a
+--     rule
+--   - loop detection
+--   - generate SSA
+--   - interpreter
+--   - constant propagation
+--   - stratification
+--   - typechecking
 
 main :: IO ()
 main = do
@@ -33,62 +46,13 @@ main = do
   printProgram prog
   putStrLn ""
 
-{-
-  putStrLn "Renamed program:"
-  printProgram (renameProgram prog)
-  putStrLn ""
+  forM_ (programToStatements prog) (mapM_ (putStrLn . pretty))
 
-  putStrLn "Predicate Dependency Graph:"
-  putStrLn $ prettyGraph $ computePredicateDependencyGraph prog
-  putStrLn ""
-
-  putStrLn "Enumerated weight cycles: "
-  putStrLn $ pretty $ enumerateWeightCycles $ computePredicateDependencyGraph prog
-  putStrLn ""
-
-  putStrLn "Parity Stratification Check: "
-  putStrLn $ pretty $ parityStratifyCheck prog
-  putStrLn ""
--}
-
-  let (exprs, stmts) = runTacM $ do
-        (exprs0, stmts0) <- runWriterT $ renameToHead
-          $ Rule (Relation (Rel 36)
-              [ Left (ConstantInt 3)
-              , Right (ElaborationName (Just 10))
-              , Right (ElaborationName (Just 11))
-              ]
-            )
-          $ map (, NotNegated)
-            [ Relation (Rel 45)
-                [ Right (ElaborationName (Just 10))
-                , Right (ElaborationName (Just 11))
-                ]
-            ]
-        pure (exprs0, stmts0)
-{-
-  let (stmts, exprs) = runTacM $ do
-        (stmts0, exprs0) <- joinSubgoals
-          $ map ((, NotNegated) . fmap ElaborationName)
-            [ Relation 20 [Right (Just 9), Right (Just 6), Right (Just 7)]
-            , Relation 21 [Right (Just 8), Right (Just 7), Right (Just 9)]
-            , Relation 22 [Right (Just 6)]
-            ]
-        (stmts1, exprs1) <- joinSubgoals exprs0
-        pure (stmts0 ++ stmts1, exprs1)
-
-  let (exprs, stmts) = runTacM $ do
-        (exprs0, stmts0) <- runWriterT $ selectConstants
-          $ id @[Expr Int Name]
-          $ map ((, NotNegated) . fmap ElaborationName)
-            [ Relation 20 [Left (ConstantInt 3), Right (Just 6), Left (ConstantBitString [True,True,True,False])]
-            , Relation 22 [Right (Just 6)]
-            ]
-        pure (exprs0, stmts0)
-
--}
-  mapM_ (putStrLn . pretty) stmts
-  mapM_ (putStrLn . prettyExpr) exprs
+programToStatements :: Program Rel Name -> [[Statement Rel]]
+programToStatements = runTacM . mapM iWantItAll . filter isRule . decls
+  where
+    isRule (Rule _ []) = False
+    isRule _ = True
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do
@@ -98,7 +62,7 @@ printProgram prog = do
   putStrLn "Types:"
   mapM_ (putStrLn . uncurry prettyType) (Map.toList (types prog))
 
-doParse :: FilePath -> IO (Program Name Name)
+doParse :: FilePath -> IO (Program Rel Name)
 doParse progFile = do
   progCode <- readFile progFile
   either fail pure (parseProgram progFile progCode)

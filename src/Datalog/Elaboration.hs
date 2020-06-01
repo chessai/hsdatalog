@@ -1,5 +1,6 @@
 --------------------------------------------------------------------------------
 
+{-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -19,10 +20,11 @@ module Datalog.Elaboration where
 
 import Control.Lens (Lens', unsafePartsOf, (%~), (&))
 import Control.Monad
+import Control.Monad.Fix (mfix)
 import Control.Monad.State.Class (get, modify)
 import Control.Monad.State.Strict (State, evalState)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Writer.CPS (WriterT, tell)
+import Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
 import Data.Bifunctor (Bifunctor, bimap, first, second)
 import Data.Data (Data)
 import Data.Data.Lens
@@ -32,8 +34,10 @@ import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Set (Set)
 import Data.Typeable (Typeable)
+import Datalog.Pretty
 import Datalog.RelAlgebra
 import Datalog.Syntax
+import Debug.Trace
 
 import qualified Data.List as List
 import qualified Data.List.Extra as Extra
@@ -47,8 +51,6 @@ class Monad m => MonadTAC rel m | m -> rel where
   freshVar :: m Name
   eqRel    :: m rel
 
-data Rel = EqualityConstraint | Rel Int
-
 newtype TacM a = TacM (State (Int, Int) a)
   deriving newtype (Functor, Applicative, Monad)
 
@@ -59,7 +61,7 @@ instance MonadTAC Rel TacM where
   freshRel = TacM $ do
     result <- fst <$> get
     modify (first (+1))
-    pure (Rel result)
+    pure (ElaborationRel result)
 
   freshVar = TacM $ do
     result <- snd <$> get
@@ -103,6 +105,31 @@ renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
                       (map (,Nothing) usedOnce ++ zip usedMany (Just <$> [n..]))
       modify (+ length usedMany)
       pure (fmap (ElaborationName . (renamings Map.!)) d)
+
+--------------------------------------------------------------------------------
+
+iWantItAll
+  :: forall m rel
+  . (Data rel, Eq rel, MonadTAC rel m, Pretty rel, Show rel)
+  => Declaration rel Name
+  -> m [Statement rel]
+iWantItAll (Rule relH e0) = execWriterT $ do
+  e1 <- removeSubgoalDuplication (Rule relH e0)
+  e2 <- eliminateNegation (Rule relH e1)
+  e3 <- removeUnused (Rule relH e2)
+  e4 <- projectUnused (Rule relH e3)
+  e5 <- selectConstants (Rule relH e4)
+  e6 <- fixpoint (joinSubgoals . Rule relH) e5
+  e7 <- joinEverythingElse (Rule relH e6)
+  e8 <- renameToHead (Rule relH e7)
+  unifyHeadRelation (Rule relH e8)
+
+fixpoint :: (Eq a, Monad m) => (a -> m a) -> a -> m a
+fixpoint f x0 = do
+  x <- f x0
+  if x == x0
+    then pure x
+    else fixpoint f x
 
 --------------------------------------------------------------------------------
 
@@ -178,7 +205,7 @@ removeUnused d@(Rule _ subgoals) = do
         ParseName       _ -> (n, ParseName       Nothing)
         ElaborationName _ -> (n, ElaborationName Nothing)
   let renamings = Map.fromList (map rename usedOnce)
-  pure (map (first (fmap (renamings Map.!))) subgoals)
+  pure (map (first (fmap (\key -> Map.findWithDefault key key renamings))) subgoals)
 
 --------------------------------------------------------------------------------
 
@@ -246,11 +273,12 @@ selectConstants (Rule _ subgoals) = flip zip (map snd subgoals)
 --       could increase total amount of renaming but this is probably a good
 --       greedy heuristic to adopt
 joinSubgoals
-  :: (MonadTAC rel m)
+  :: (MonadTAC rel m, Pretty rel, Show rel)
   => Declaration rel Name
   -> WriterT [Statement rel] m [Expr rel Name]
 joinSubgoals (Rule _ subgoals) | not (needsJoin subgoals) = pure subgoals
-joinSubgoals (Rule _ subgoals) = do
+joinSubgoals d@(Rule relH subgoals) = do
+  traceM (pretty d)
   renamedLHS <- freshRel
   tell [Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))]
   renamedRHS <- freshRel
@@ -259,25 +287,30 @@ joinSubgoals (Rule _ subgoals) = do
   tell [Assignment (TAC joined (Join (fromIntegral joinSize)
                                 renamedLHS renamedRHS))]
 
-  pure ((Relation joined (Right <$> joinedParams), NotNegated)
-        : deleteAt lhs (deleteAt rhs subgoals))
+  let args = (Relation joined (Right <$> joinedParams), NotNegated)
+             : deleteAt lhs (deleteAt rhs subgoals)
+
+  args' <- removeUnused (Rule relH args)
+  args'' <- projectUnused (Rule relH args')
+  pure args''
+
   where
-    variableUsedIn :: Map Var (Set SubgoalIndex)
+    variableUsedIn :: Map Name (Set SubgoalIndex)
     variableUsedIn =
       Map.fromListWith Set.union
       $ concatMap
         (\(ix, (Relation _ vars, _)) -> map (, Set.singleton ix)
-                                        (catVars (rights vars)))
+                                        (filter (not . isNameUnused) (rights vars)))
       $ zip [0..] subgoals
 
-    joinPairs :: Map (SubgoalIndex, SubgoalIndex) (Set Var)
+    joinPairs :: Map (SubgoalIndex, SubgoalIndex) (Set Name)
     joinPairs =
       Map.fromListWith Set.union
       $ concatMap (\(var, ps) -> (, Set.singleton var) <$> Set.toList ps)
       $ Map.toList (pairsOf <$> variableUsedIn)
 
     lhs, rhs :: SubgoalIndex
-    joinVars :: Set Var
+    joinVars :: Set Name
     ((lhs, rhs), joinVars) = Extra.maximumOn (Set.size . snd)
                              $ Map.toList joinPairs
 
@@ -289,20 +322,18 @@ joinSubgoals (Rule _ subgoals) = do
     permutationLHS, permutationRHS :: AttrPermutation
     permutationLHS =
       let names = rights lhsVars
-          joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
+          joinIndices = map (`unsafeElemIndex` names)
                         $ toList joinVars
           notJoinIndices = map fst
                            $ filter (not . (`Set.member` joinVars) . snd)
-                           $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
                            $ zip [0..] names
       in notJoinIndices ++ joinIndices
     permutationRHS =
       let names = rights rhsVars
-          joinIndices = map ((`unsafeElemIndex` names) . ElaborationName . Just)
+          joinIndices = map (`unsafeElemIndex` names)
                         $ toList joinVars
           notJoinIndices = map fst
                            $ filter (not . (`Set.member` joinVars) . snd)
-                           $ mapMaybe (\(i, n) -> (i, ) <$> getVar n)
                            $ zip [0..] names
       in joinIndices ++ notJoinIndices
 
@@ -332,18 +363,7 @@ joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
 
 --------------------------------------------------------------------------------
 
-{-
-data RelAlgebra rel
-  = Not rel
-  | Const [Constant]
-  | Join Natural rel rel
-  | Union rel rel
-  | Project [Attr] rel
-  | Rename AttrPermutation rel
-  | Difference rel rel
-  | Select Attr Constant rel -- Int constants are all we have right now
--}
-
+-- might be 4 and 5 in thesis.
 renameToHead
   :: (MonadTAC rel m)
   => Declaration rel Name
@@ -383,20 +403,22 @@ renameToHead _ = error "renameToHead: precondition violation"
 
 --------------------------------------------------------------------------------
 
+unifyHeadRelation
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m [Expr rel Name]
+unifyHeadRelation (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
+  unless (args == argsH) (error "unifyHeadRelation: precondition violation")
+  tell [Assignment (TAC relH (Union relH rel))]
+  pure [] -- TODO: rethink if we should just pure ()
+unifyHeadRelation _ = error "unifyHeadRelation: precondition violation"
+
+--------------------------------------------------------------------------------
+
 isNameUnused :: Name -> Bool
 isNameUnused = \case
   ParseName       m -> isNothing m
   ElaborationName m -> isNothing m
-
-getVar :: Name -> Maybe Var
-getVar = \case
-  ParseName       _ -> Nothing
-  ElaborationName m -> m
-
-catVars :: [Name] -> [Var]
-catVars = mapMaybe $ \case
-  ParseName       _ -> Nothing
-  ElaborationName m -> m
 
 --------------------------------------------------------------------------------
 

@@ -16,6 +16,7 @@ module Datalog.Syntax
   , Type(..)
   , Var
   , Name(..)
+  , Rel(..)
 
   , parseProgram
   , isNotNegated
@@ -48,6 +49,9 @@ data Name
   = ParseName (Maybe String)
   | ElaborationName (Maybe Var)
   deriving stock (Eq, Ord, Show, Generic, Data)
+
+data Rel = EqualityConstraint | ElaborationRel Int | ParseRel String
+  deriving stock (Eq, Ord, Show, Data)
 
 data Constant
   = ConstantInt Int
@@ -100,7 +104,7 @@ data Type
 
 --------------------------------------------------------
 
-type Parser = ParsecT Void String (State (Map Name Type))
+type Parser = ParsecT Void String (State (Map Rel Type))
 
 sc :: Parser ()
 sc = L.space (void spaceChar) lineCmt blockCmt
@@ -129,10 +133,16 @@ parens = between (symbol "(") (symbol ")")
 reserved :: String -> Parser ()
 reserved w = string w *> notFollowedBy alphaNumChar *> sc
 
-identifier :: Parser Name
-identifier = (lexeme . try) (ParseName . Just <$> ident)
+identifier :: Parser String
+identifier = (lexeme . try) ident
   where
     ident = (:) <$> letterChar <*> many alphaNumChar
+
+name :: Parser Name
+name = fmap (ParseName . Just) identifier
+
+rel :: Parser Rel
+rel = ParseRel <$> identifier
 
 bool :: Parser Bool
 bool = (True <$ reserved "#true") <|> (False <$ reserved "#false")
@@ -149,7 +159,7 @@ constant = (lexeme . try)
     <|> (ConstantBitString <$> bitString)
   )
 
-program :: Parser (Program Name Name)
+program :: Parser (Program Rel Name)
 program = do
   decls <- concat <$> between sc eof (many topLevel)
   types <- get
@@ -159,26 +169,26 @@ program = do
 --
 -- if we extend the syntax such that the typing state can be updated, but then a
 -- failure occurs and we have to backtrack, is the state change undone?
-topLevel :: Parser [Declaration Name Name]
+topLevel :: Parser [Declaration Rel Name]
 topLevel = try (typeSignature *> pure []) <|> ((:[]) <$> declaration)
 
-declaration :: Parser (Declaration Name Name)
+declaration :: Parser (Declaration Rel Name)
 declaration = do
   rel <- relation
   rels <- try (infersFrom *> exprs) <|> (period *> pure [])
   pure (Rule rel rels)
 
-relation :: Parser (Relation Name Name)
+relation :: Parser (Relation Rel Name)
 relation = do
-  name <- identifier
+  name <- rel
   vars <- parens (rhs `sepBy` comma)
   pure (Relation name vars)
   where
-    rhs = (Left <$> constant) <|> (Right <$> identifier)
+    rhs = (Left <$> constant) <|> (Right <$> name)
 
 typeSignature :: Parser ()
 typeSignature = do
-  name <- identifier
+  name <- rel
   symbol ":"
   reserved "Relation"
   types <- parens (typ `sepBy`comma)
@@ -191,14 +201,14 @@ typ = do
   <|> (TypeBool <$ reserved "Bool")
   <|> (reserved "BitString" *> (TypeBitString <$> L.decimal))
 
-expr :: Parser (Relation Name Name, Negated)
+expr :: Parser (Relation Rel Name, Negated)
 expr = do
   negated <- maybe NotNegated (const Negated) <$> try (optional (symbol "!"))
   rel <- relation
   pure (rel, negated)
 
-exprs :: Parser [(Relation Name Name, Negated)]
+exprs :: Parser [(Relation Rel Name, Negated)]
 exprs = between sc period (expr `sepBy` comma)
 
-parseProgram :: FilePath -> String -> Either String (Program Name Name)
+parseProgram :: FilePath -> String -> Either String (Program Rel Name)
 parseProgram file input = first errorBundlePretty $ flip evalState Map.empty $ runParserT program file input
