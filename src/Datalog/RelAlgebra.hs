@@ -24,6 +24,7 @@ type AttrPermutation = [Attr]
 
 data RelAlgebra rel
   = Not rel
+  | Const [Constant]
   | Join Natural rel rel
   | Union rel rel
   | Project [Attr] rel

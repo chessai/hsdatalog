@@ -116,7 +116,11 @@ removeSubgoalDuplication (Rule _ ss) = impl ss
     impl [] = pure []
     impl (subgoal : subgoals) = do
       let allVars :: Map Name Int
-          allVars = Map.fromListWith (+) (zip (toList (fst subgoal)) (repeat 1))
+          allVars =
+            Map.fromList
+            $ filter ((> 1) . snd)
+            $ Map.toList
+            $ Map.fromListWith (+) (zip (toList (fst subgoal)) (repeat 1))
       names <- traverse (`replicateM` freshVar) allVars
 
       let mkEquality (x, y) = do
@@ -126,7 +130,7 @@ removeSubgoalDuplication (Rule _ ss) = impl ss
 
       let modifyName :: Name -> State (Map Name Int) Name
           modifyName n = do
-            if Map.findWithDefault 0 n allVars == 0
+            if Map.findWithDefault 0 n allVars <= 1
               then pure n
               else do
                 s <- get
@@ -328,6 +332,23 @@ joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
 
 --------------------------------------------------------------------------------
 
+renameToHead
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m [Expr rel Name]
+renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
+  undefined
+  let neededVariables = filter (not . isNameUnused) (rights argsH)
+
+  let rel' :: rel
+      rel' = undefined
+  let args' :: [Either Constant Name]
+      args' = undefined
+  pure [(Relation rel' args', NotNegated)]
+renameToHead _ = error "renameToHead: precondition violation"
+
+--------------------------------------------------------------------------------
+
 isNameUnused :: Name -> Bool
 isNameUnused = \case
   ParseName       m -> isNothing m
@@ -342,6 +363,18 @@ catVars :: [Name] -> [Var]
 catVars = mapMaybe $ \case
   ParseName       _ -> Nothing
   ElaborationName m -> m
+
+--------------------------------------------------------------------------------
+
+-- | Compute the permutation from one list to another, if one exists.
+--
+-- Laws:
+-- 1. If @Just p = computePermutation xs ys@, then @ys = applyPermutation p xs@.
+computePermutation :: Eq a => [a] -> [a] -> Maybe AttrPermutation
+computePermutation xs ys = mapM (\x -> List.elemIndex x ys) xs
+
+applyPermutation :: AttrPermutation -> [a] -> [a]
+applyPermutation perm xs = map (xs !!) perm
 
 --------------------------------------------------------------------------------
 
@@ -360,9 +393,6 @@ needsJoin = any (> 1)
             . map (, 1 :: Int)
             . rights
             . concatMap (relArguments . fst)
-
-applyPermutation :: AttrPermutation -> [a] -> [a]
-applyPermutation perm xs = map (xs !!) perm
 
 pairsOf :: (Ord a) => Set a -> Set (a, a)
 pairsOf vals = Set.fromList
