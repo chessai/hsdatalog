@@ -26,50 +26,51 @@ import qualified Datalog.Cudd as Cudd
 
 main :: IO ()
 main = do
-  withParse "test.datalog" $ \prog -> do
-    putStrLn "Input program:"
-    printProgram prog
-    putStrLn ""
+  prog <- doParse "test.datalog"
+
+  putStrLn "Input program:"
+  printProgram prog
+  putStrLn ""
 
 {-
-    putStrLn "Renamed program:"
-    printProgram (renameProgram prog)
-    putStrLn ""
+  putStrLn "Renamed program:"
+  printProgram (renameProgram prog)
+  putStrLn ""
 
-    putStrLn "Predicate Dependency Graph:"
-    putStrLn $ prettyGraph $ computePredicateDependencyGraph prog
-    putStrLn ""
+  putStrLn "Predicate Dependency Graph:"
+  putStrLn $ prettyGraph $ computePredicateDependencyGraph prog
+  putStrLn ""
 
-    putStrLn "Enumerated weight cycles: "
-    putStrLn $ pretty $ enumerateWeightCycles $ computePredicateDependencyGraph prog
-    putStrLn ""
+  putStrLn "Enumerated weight cycles: "
+  putStrLn $ pretty $ enumerateWeightCycles $ computePredicateDependencyGraph prog
+  putStrLn ""
 
-    putStrLn "Parity Stratification Check: "
-    putStrLn $ pretty $ parityStratifyCheck prog
-    putStrLn ""
+  putStrLn "Parity Stratification Check: "
+  putStrLn $ pretty $ parityStratifyCheck prog
+  putStrLn ""
 -}
 {-
-    let (stmts, exprs) = runTacM $ do
-          (stmts0, exprs0) <- joinSubgoals
-            $ map ((, NotNegated) . fmap ElaborationName)
-              [ Relation 20 [Right (Just 9), Right (Just 6), Right (Just 7)]
-              , Relation 21 [Right (Just 8), Right (Just 7), Right (Just 9)]
-              , Relation 22 [Right (Just 6)]
-              ]
-          (stmts1, exprs1) <- joinSubgoals exprs0
-          pure (stmts0 ++ stmts1, exprs1)
+  let (stmts, exprs) = runTacM $ do
+        (stmts0, exprs0) <- joinSubgoals
+          $ map ((, NotNegated) . fmap ElaborationName)
+            [ Relation 20 [Right (Just 9), Right (Just 6), Right (Just 7)]
+            , Relation 21 [Right (Just 8), Right (Just 7), Right (Just 9)]
+            , Relation 22 [Right (Just 6)]
+            ]
+        (stmts1, exprs1) <- joinSubgoals exprs0
+        pure (stmts0 ++ stmts1, exprs1)
 
-    let (exprs, stmts) = runTacM $ do
-          (exprs0, stmts0) <- runWriterT $ selectConstants
-            $ id @[Expr Int Name]
-            $ map ((, NotNegated) . fmap ElaborationName)
-              [ Relation 20 [Left (ConstantInt 3), Right (Just 6), Left (ConstantBitString [True,True,True,False])]
-              , Relation 22 [Right (Just 6)]
-              ]
-          pure (exprs0, stmts0)
+  let (exprs, stmts) = runTacM $ do
+        (exprs0, stmts0) <- runWriterT $ selectConstants
+          $ id @[Expr Int Name]
+          $ map ((, NotNegated) . fmap ElaborationName)
+            [ Relation 20 [Left (ConstantInt 3), Right (Just 6), Left (ConstantBitString [True,True,True,False])]
+            , Relation 22 [Right (Just 6)]
+            ]
+        pure (exprs0, stmts0)
 
-    mapM_ (putStrLn . pretty) stmts
-    mapM_ (putStrLn . prettyExpr) exprs
+  mapM_ (putStrLn . pretty) stmts
+  mapM_ (putStrLn . prettyExpr) exprs
 -}
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
@@ -80,7 +81,7 @@ printProgram prog = do
   putStrLn "Types:"
   mapM_ (putStrLn . uncurry prettyType) (Map.toList (types prog))
 
-withParse :: FilePath -> (Program Name Name -> IO ()) -> IO ()
-withParse progFile f = do
+doParse :: FilePath -> IO (Program Name Name)
+doParse progFile = do
   progCode <- readFile progFile
-  either putStrLn f (parseProgram progFile progCode)
+  either fail pure (parseProgram progFile progCode)
