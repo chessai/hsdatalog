@@ -1,5 +1,6 @@
-{-# LANGUAGE TupleSections    #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TypeApplications    #-}
 
 module Datalog
   ( main
@@ -49,6 +50,22 @@ main = do
   putStrLn $ pretty $ parityStratifyCheck prog
   putStrLn ""
 -}
+
+  let (exprs, stmts) = runTacM $ do
+        (exprs0, stmts0) <- runWriterT $ renameToHead
+          $ Rule (Relation (Rel 36)
+              [ Left (ConstantInt 3)
+              , Right (ElaborationName (Just 10))
+              , Right (ElaborationName (Just 11))
+              ]
+            )
+          $ map (, NotNegated)
+            [ Relation (Rel 45)
+                [ Right (ElaborationName (Just 10))
+                , Right (ElaborationName (Just 11))
+                ]
+            ]
+        pure (exprs0, stmts0)
 {-
   let (stmts, exprs) = runTacM $ do
         (stmts0, exprs0) <- joinSubgoals
@@ -69,9 +86,9 @@ main = do
             ]
         pure (exprs0, stmts0)
 
+-}
   mapM_ (putStrLn . pretty) stmts
   mapM_ (putStrLn . prettyExpr) exprs
--}
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

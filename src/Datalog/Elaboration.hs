@@ -6,6 +6,7 @@
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE UndecidableInstances       #-}
@@ -16,7 +17,7 @@ module Datalog.Elaboration where
 
 --------------------------------------------------------------------------------
 
-import Control.Lens (Lens', (&), (%~), unsafePartsOf)
+import Control.Lens (Lens', unsafePartsOf, (%~), (&))
 import Control.Monad
 import Control.Monad.State.Class (get, modify)
 import Control.Monad.State.Strict (State, evalState)
@@ -306,8 +307,7 @@ joinSubgoals (Rule _ subgoals) = do
       in joinIndices ++ notJoinIndices
 
     unsafeElemIndex :: Eq a => a -> [a] -> Int
-    unsafeElemIndex el xs = fromMaybe undefined -- FIXME
-                            (List.elemIndex el xs)
+    unsafeElemIndex el xs = fromMaybe (error "unsafeElemIndex: out of bounds") (List.elemIndex el xs)
 
     joinedParams :: [Name]
     joinedParams =
@@ -332,19 +332,53 @@ joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
 
 --------------------------------------------------------------------------------
 
+{-
+data RelAlgebra rel
+  = Not rel
+  | Const [Constant]
+  | Join Natural rel rel
+  | Union rel rel
+  | Project [Attr] rel
+  | Rename AttrPermutation rel
+  | Difference rel rel
+  | Select Attr Constant rel -- Int constants are all we have right now
+-}
+
 renameToHead
   :: (MonadTAC rel m)
   => Declaration rel Name
   -> WriterT [Statement rel] m [Expr rel Name]
 renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
-  undefined
-  let neededVariables = filter (not . isNameUnused) (rights argsH)
+  -- project away things in args but not in argsH
+  --
+  -- if there are any constants in relH, use `Const` to generate new columns and
+  -- then join them on with size 0
+  --
+  let thingsInArgsHButNotInArgs :: [Attr]
+      thingsInArgsHButNotInArgs = map (fromMaybe (error "renameToHead: difference of opinions") . (`List.elemIndex` args))
+        $ filter isRight argsH
 
-  let rel' :: rel
-      rel' = undefined
+  let constantsInArgsH :: [Constant]
+      constantsInArgsH = lefts argsH
+
+  projectedRel <- freshRel
+  tell [Assignment (TAC projectedRel (Project thingsInArgsHButNotInArgs rel))]
+
+  constRel <- freshRel
+  tell [Assignment (TAC constRel (Const constantsInArgsH))]
+
+  joinRel <- freshRel
+  tell [Assignment (TAC joinRel (Join 0 projectedRel constRel))]
+
+  -- needs to be a permutation of argsH
   let args' :: [Either Constant Name]
-      args' = undefined
-  pure [(Relation rel' args', NotNegated)]
+      args' = map (args !!) (List.sort thingsInArgsHButNotInArgs) ++ map Left constantsInArgsH
+
+  let perm = fromMaybe (error "renameToHead: computePermutation did not succeed") (computePermutation args' argsH)
+  renameRel <- freshRel
+  tell [Assignment (TAC renameRel (Rename perm joinRel))]
+
+  pure [(Relation renameRel argsH, NotNegated)]
 renameToHead _ = error "renameToHead: precondition violation"
 
 --------------------------------------------------------------------------------

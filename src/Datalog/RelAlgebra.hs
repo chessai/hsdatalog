@@ -27,7 +27,7 @@ data RelAlgebra rel
   | Const [Constant]
   | Join Natural rel rel
   | Union rel rel
-  | Project [Attr] rel
+  | Project [Attr] rel -- TODO: should be (Set Attr)
   | Rename AttrPermutation rel
   | Difference rel rel
   | Select Attr Constant rel -- Int constants are all we have right now

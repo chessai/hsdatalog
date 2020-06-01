@@ -62,6 +62,7 @@ instance Pretty Name where
 instance (Pretty rel) => Pretty (RelAlgebra rel) where
   pretty = \case
     Not rel -> "¬" ++ pretty rel
+    Const cs -> pretty cs
     -- was "⋈" but you can barely see it
     Join sub x y -> pretty x ++ " ∞" ++ showSubscript sub ++ " " ++ pretty y
     Union x y -> pretty x ++ " ∪ " ++ pretty y
@@ -78,6 +79,11 @@ instance (Pretty rel) => Pretty (Statement rel) where
 
 instance (Pretty rel) => Pretty (TAC rel) where
   pretty (TAC rel alg) = pretty rel ++ " := " ++ pretty alg
+
+instance Pretty Rel where
+  pretty = \case
+    EqualityConstraint -> "~"
+    Rel i -> show i
 
 prettyExpr :: (Pretty rel, Pretty var) => Expr rel var -> String
 prettyExpr (rel, negated) = bool "!" "" (isNotNegated negated) ++ pretty rel
