@@ -69,6 +69,7 @@ instance (Pretty rel) => Pretty (RelAlgebra rel) where
     Rename perm rel -> "ρ(" ++ pretty perm ++ ", " ++ pretty rel ++ ")"
     Difference x y -> pretty x ++ " – " ++ pretty y
     Select attr cnst rel -> "σ(" ++ pretty attr ++ " = " ++ pretty cnst ++ ", " ++ pretty rel ++ ")"
+    Everything -> "everything"
 
 instance (Pretty rel) => Pretty (Statement rel) where
   pretty = \case

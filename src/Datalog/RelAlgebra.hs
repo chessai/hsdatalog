@@ -31,6 +31,7 @@ data RelAlgebra rel
   | Rename AttrPermutation rel
   | Difference rel rel
   | Select Attr Constant rel -- Int constants are all we have right now
+  | Everything -- the relation that contains everything
   deriving stock (Eq, Ord, Show, Generic)
   deriving stock (Functor, Foldable, Traversable)
 

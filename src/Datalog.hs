@@ -28,12 +28,9 @@ import qualified Data.Map.Strict as Map
 import qualified Datalog.Cudd as Cudd
 
 -- TODO (on the next episode):
---   - correctly handle facts
---   - correctly handle situations where a variable is repeated in the head of a
---     rule
+--   - interpreter
 --   - loop detection
 --   - generate SSA
---   - interpreter
 --   - constant propagation
 --   - stratification
 --   - typechecking
@@ -49,7 +46,7 @@ main = do
   forM_ (programToStatements prog) (mapM_ (putStrLn . pretty))
 
 programToStatements :: Program Rel Name -> [[Statement Rel]]
-programToStatements = runTacM . mapM iWantItAll . filter isRule . decls
+programToStatements = runTacM . mapM iWantItAll . decls
   where
     isRule (Rule _ []) = False
     isRule _ = True

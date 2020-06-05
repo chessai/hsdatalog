@@ -108,21 +108,28 @@ renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
 
 --------------------------------------------------------------------------------
 
+-- TODO: add another pass to turn all constants in bitstrings, to simplify
+-- things in the interpreter
 iWantItAll
   :: forall m rel
   . (Data rel, Eq rel, MonadTAC rel m, Pretty rel, Show rel)
   => Declaration rel Name
   -> m [Statement rel]
-iWantItAll (Rule relH e0) = execWriterT $ do
-  e1 <- removeSubgoalDuplication (Rule relH e0)
-  e2 <- eliminateNegation (Rule relH e1)
-  e3 <- removeUnused (Rule relH e2)
-  e4 <- projectUnused (Rule relH e3)
-  e5 <- selectConstants (Rule relH e4)
-  e6 <- fixpoint (joinSubgoals . Rule relH) e5
-  e7 <- joinEverythingElse (Rule relH e6)
-  e8 <- renameToHead (Rule relH e7)
-  unifyHeadRelation (Rule relH e8)
+iWantItAll d = execWriterT $ do
+  unifyHeadRelation =<< flip mcompose d
+    [ removeDuplication
+    , eliminateNegation
+    , removeUnused
+    , projectUnused
+    , selectConstants
+    , fixpoint joinSubgoals
+    , generateEverythings
+    , joinEverythingElse
+    , renameToHead
+    ]
+
+mcompose :: (Foldable t, Monad m) => t (a -> m a) -> a -> m a
+mcompose = foldr (>=>) pure
 
 fixpoint :: (Eq a, Monad m) => (a -> m a) -> a -> m a
 fixpoint f x0 = do
@@ -133,12 +140,17 @@ fixpoint f x0 = do
 
 --------------------------------------------------------------------------------
 
-removeSubgoalDuplication
+-- remove duplication in the head relation and subgoals
+removeDuplication
   :: forall m rel
   .  (Data rel, MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-removeSubgoalDuplication (Rule _ ss) = impl ss
+  -> WriterT [Statement rel] m (Declaration rel Name)
+removeDuplication (Rule relH ss) = do
+  exprs <- impl ((relH, NotNegated) : ss)
+  case exprs of
+    ((r, NotNegated) : es) -> pure (Rule r es)
+    _ -> error "removeDuplication: whaaaaaaa?"
   where
     impl :: [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
     impl [] = pure []
@@ -180,8 +192,8 @@ eliminateNegation
   :: forall m rel
   .  (MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-eliminateNegation (Rule _ subgoals) = traverse go subgoals
+  -> WriterT [Statement rel] m (Declaration rel Name)
+eliminateNegation (Rule relH subgoals) = Rule relH <$> traverse go subgoals
   where
     go :: Expr rel Name -> WriterT [Statement rel] m (Expr rel Name)
     go (relation, NotNegated) = pure (relation, NotNegated)
@@ -196,8 +208,8 @@ eliminateNegation (Rule _ subgoals) = traverse go subgoals
 removeUnused
   :: (Monad m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-removeUnused d@(Rule _ subgoals) = do
+  -> WriterT [Statement rel] m (Declaration rel Name)
+removeUnused d@(Rule relH subgoals) = do
   let allVars :: [(Name, Int)]
       allVars = Map.toAscList (Map.fromListWith (+) (zip (toList d) (repeat 1)))
   let usedOnce = map fst (filter ((== 1) . snd) allVars)
@@ -205,7 +217,7 @@ removeUnused d@(Rule _ subgoals) = do
         ParseName       _ -> (n, ParseName       Nothing)
         ElaborationName _ -> (n, ElaborationName Nothing)
   let renamings = Map.fromList (map rename usedOnce)
-  pure (map (first (fmap (\key -> Map.findWithDefault key key renamings))) subgoals)
+  pure (Rule relH (map (first (fmap (\key -> Map.findWithDefault key key renamings))) subgoals))
 
 --------------------------------------------------------------------------------
 
@@ -214,12 +226,12 @@ projectUnused
   :: forall m rel
   .  (MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-projectUnused (Rule _ subgoals)
+  -> WriterT [Statement rel] m (Declaration rel Name)
+projectUnused (Rule relH subgoals)
   | any isNameUnused (concatMap (toList . fst) subgoals)
-  = flip zip (map snd subgoals) <$> traverse (go . fst) subgoals
+  = (Rule relH . flip zip (map snd subgoals)) <$> traverse (go . fst) subgoals
   | otherwise
-  = pure subgoals
+  = pure (Rule relH subgoals)
   where
     go :: Relation rel Name -> WriterT [Statement rel] m (Relation rel Name)
     go (Relation rel vars)
@@ -238,9 +250,9 @@ selectConstants
   :: forall m rel
   .  (MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-selectConstants (Rule _ subgoals) = flip zip (map snd subgoals)
-                                    <$> traverse (go . fst) subgoals
+  -> WriterT [Statement rel] m (Declaration rel Name)
+selectConstants (Rule relH subgoals) = (Rule relH . flip zip (map snd subgoals))
+                                       <$> traverse (go . fst) subgoals
   where
     go :: Relation rel Name -> WriterT [Statement rel] m (Relation rel Name)
     go (Relation rel args) | all isRight args = pure (Relation rel args)
@@ -275,10 +287,9 @@ selectConstants (Rule _ subgoals) = flip zip (map snd subgoals)
 joinSubgoals
   :: (MonadTAC rel m, Pretty rel, Show rel)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-joinSubgoals (Rule _ subgoals) | not (needsJoin subgoals) = pure subgoals
+  -> WriterT [Statement rel] m (Declaration rel Name)
+joinSubgoals (Rule relH subgoals) | not (needsJoin subgoals) = pure (Rule relH subgoals)
 joinSubgoals d@(Rule relH subgoals) = do
-  traceM (pretty d)
   renamedLHS <- freshRel
   tell [Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))]
   renamedRHS <- freshRel
@@ -290,9 +301,7 @@ joinSubgoals d@(Rule relH subgoals) = do
   let args = (Relation joined (Right <$> joinedParams), NotNegated)
              : deleteAt lhs (deleteAt rhs subgoals)
 
-  args' <- removeUnused (Rule relH args)
-  args'' <- projectUnused (Rule relH args')
-  pure args''
+  projectUnused =<< removeUnused (Rule relH args)
 
   where
     variableUsedIn :: Map Name (Set SubgoalIndex)
@@ -347,12 +356,29 @@ joinSubgoals d@(Rule relH subgoals) = do
 
 --------------------------------------------------------------------------------
 
+generateEverythings
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m (Declaration rel Name)
+generateEverythings (Rule (Relation relH argsH) exprs) = do
+  rel <- freshRel
+  let lhsVars :: Set Name
+      lhsVars = Set.fromList $ concatMap toList argsH
+      rhsVars :: Set Name
+      rhsVars = Set.fromList $ concatMap (toList . fst) exprs
+      args :: [Either a Name]
+      args = map Right $ Set.toList $ lhsVars `Set.difference` rhsVars
+  tell [Assignment (TAC rel Everything)]
+  pure (Rule (Relation relH argsH) ((Relation rel args, NotNegated) : exprs))
+
+--------------------------------------------------------------------------------
+
 joinEverythingElse
   :: (MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
-joinEverythingElse (Rule _ [])     = pure []
-joinEverythingElse (Rule _ [expr]) = pure [expr]
+  -> WriterT [Statement rel] m (Declaration rel Name)
+joinEverythingElse (Rule relH [])     = pure (Rule relH [])
+joinEverythingElse (Rule relH [expr]) = pure (Rule relH [expr])
 joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
   let (Relation relA argsA, _) = exprA
   let (Relation relB argsB, _) = exprB
@@ -367,7 +393,8 @@ joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
 renameToHead
   :: (MonadTAC rel m)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
+  -> WriterT [Statement rel] m (Declaration rel Name)
+renameToHead (Rule relH []) = pure (Rule relH [])
 renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
   -- project away things in args but not in argsH
   --
@@ -375,7 +402,10 @@ renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
   -- then join them on with size 0
   --
   let thingsInArgsHButNotInArgs :: [Attr]
-      thingsInArgsHButNotInArgs = map (fromMaybe (error "renameToHead: difference of opinions") . (`List.elemIndex` args))
+      thingsInArgsHButNotInArgs = map
+        (fromMaybe (error "renameToHead: difference of opinions")
+          . (`List.elemIndex` args)
+        )
         $ filter isRight argsH
 
   let constantsInArgsH :: [Constant]
@@ -398,19 +428,20 @@ renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
   renameRel <- freshRel
   tell [Assignment (TAC renameRel (Rename perm joinRel))]
 
-  pure [(Relation renameRel argsH, NotNegated)]
+  pure (Rule (Relation relH argsH) [(Relation renameRel argsH, NotNegated)])
 renameToHead _ = error "renameToHead: precondition violation"
 
 --------------------------------------------------------------------------------
 
 unifyHeadRelation
-  :: (MonadTAC rel m)
+  :: (MonadTAC rel m, Pretty rel)
   => Declaration rel Name
-  -> WriterT [Statement rel] m [Expr rel Name]
+  -> WriterT [Statement rel] m ()
+unifyHeadRelation (Rule rel []) = do
+  error $ pretty rel
 unifyHeadRelation (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
   unless (args == argsH) (error "unifyHeadRelation: precondition violation")
   tell [Assignment (TAC relH (Union relH rel))]
-  pure [] -- TODO: rethink if we should just pure ()
 unifyHeadRelation _ = error "unifyHeadRelation: precondition violation"
 
 --------------------------------------------------------------------------------
