@@ -43,13 +43,7 @@ main = do
   printProgram prog
   putStrLn ""
 
-  forM_ (programToStatements prog) (mapM_ (putStrLn . pretty))
-
-programToStatements :: Program Rel Name -> [[Statement Rel]]
-programToStatements = runTacM . mapM iWantItAll . decls
-  where
-    isRule (Rule _ []) = False
-    isRule _ = True
+  putStrLn (pretty (programToStatement prog))
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

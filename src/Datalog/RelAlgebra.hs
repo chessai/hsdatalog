@@ -62,12 +62,14 @@ interpret tacs m = foldlM (flip (uncurry go)) m tacs
 data TAC rel
   = TAC rel (RelAlgebra rel)
   deriving stock (Eq, Ord, Show, Generic)
+  deriving stock (Functor, Foldable, Traversable)
 
 data Statement rel
   = While [rel] (Statement rel)
   | Block [Statement rel]
   | Assignment (TAC rel)
   deriving stock (Eq, Ord, Show, Generic)
+  deriving stock (Functor, Foldable, Traversable)
 
 newtype Tuple = Tuple [Constant]  deriving (Eq, Ord, Show)
 newtype Table = Table (Set Tuple) deriving (Eq, Ord, Show)

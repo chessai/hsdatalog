@@ -1,4 +1,4 @@
-/*ancestor : Relation(Int, Int, Int).
+ancestor : Relation(Int, Int, Int).
 ancestor(X, Y, K) :- parent(X, Y).
 ancestor(X, Y, K) :- parent(X, Z), ancestor(Z, Y, 0).
 
@@ -6,7 +6,6 @@ ancestor(X, Y, K) :- parent(X, Z), ancestor(Z, Y, 0).
 path(X, X).
 path(X, Y) :- neighbor(X, Y).
 path(X, Y) :- path(X, Z), path(Z, Y).
-*/
 
 //bar(0,1).
 

@@ -80,14 +80,14 @@ type SubgoalIndex = Int
 --------------------------------------------------------------------------------
 
 programToStatement
-  :: forall m rel
-  .  (MonadTAC rel m, Ord rel, Show rel)
-  => Program rel Name
-  -> m (Statement rel)
-programToStatement (Program ds _) = fmap (Block . concat) (traverse go ds)
-  where
-    go :: Declaration rel Name -> m [Statement rel]
-    go = undefined
+  :: Program Rel Name
+  -> Statement Rel
+programToStatement (Program ds _) = runTacM $ do
+  statement <- (Block . map Block) <$> traverse iWantItAll ds
+  let isParseRel :: Rel -> Bool
+      isParseRel (ParseRel _) = True
+      isParseRel _ = False
+  pure (While (filter isParseRel (setNub (toList statement))) statement)
 
 --------------------------------------------------------------------------------
 
@@ -112,7 +112,7 @@ renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
 -- things in the interpreter
 iWantItAll
   :: forall m rel
-  . (Data rel, Eq rel, MonadTAC rel m, Pretty rel, Show rel)
+  . (Data rel, Eq rel, MonadTAC rel m)
   => Declaration rel Name
   -> m [Statement rel]
 iWantItAll d = execWriterT $ do
@@ -285,7 +285,7 @@ selectConstants (Rule relH subgoals) = (Rule relH . flip zip (map snd subgoals))
 --       could increase total amount of renaming but this is probably a good
 --       greedy heuristic to adopt
 joinSubgoals
-  :: (MonadTAC rel m, Pretty rel, Show rel)
+  :: (MonadTAC rel m)
   => Declaration rel Name
   -> WriterT [Statement rel] m (Declaration rel Name)
 joinSubgoals (Rule relH subgoals) | not (needsJoin subgoals) = pure (Rule relH subgoals)
@@ -434,11 +434,12 @@ renameToHead _ = error "renameToHead: precondition violation"
 --------------------------------------------------------------------------------
 
 unifyHeadRelation
-  :: (MonadTAC rel m, Pretty rel)
+  :: (MonadTAC rel m)
   => Declaration rel Name
   -> WriterT [Statement rel] m ()
-unifyHeadRelation (Rule rel []) = do
-  error $ pretty rel
+-- we don't seem to run into this in practise?
+--unifyHeadRelation (Rule rel []) = do
+--  error $ pretty rel
 unifyHeadRelation (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
   unless (args == argsH) (error "unifyHeadRelation: precondition violation")
   tell [Assignment (TAC relH (Union relH rel))]
@@ -512,5 +513,8 @@ used' d =
                 $ Map.toAscList
                 $ Map.fromListWith (+) (zip (toList d) (repeat 1))
   in Map.fromListWith (++) allVars
+
+setNub :: Ord a => [a] -> [a]
+setNub = Set.toList . Set.fromList
 
 --------------------------------------------------------------------------------

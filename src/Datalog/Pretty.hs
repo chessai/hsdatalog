@@ -73,8 +73,8 @@ instance (Pretty rel) => Pretty (RelAlgebra rel) where
 
 instance (Pretty rel) => Pretty (Statement rel) where
   pretty = \case
-    While rel s -> "while " ++ pretty rel ++ " { " ++ pretty s ++ " }"
-    Block ss -> "{ " ++ concatMap ((++ "; ") . pretty) ss ++ "}"
+    While rel s -> "while " ++ pretty rel ++ " " ++ pretty s ++ ";"
+    Block ss -> "{\n" ++ indent 4 (concatMap ((++ ";\n") . pretty) ss) ++ "}"
     Assignment t -> pretty t
 
 instance (Pretty rel) => Pretty (TAC rel) where
@@ -114,4 +114,5 @@ showSubscript = map toSubscript . show
       '9'   -> '₉'
       other -> other
 
-
+indent :: Int -> String -> String
+indent n = unlines . map (replicate n ' ' ++) . lines
