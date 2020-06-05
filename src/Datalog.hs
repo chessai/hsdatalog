@@ -29,6 +29,7 @@ import qualified Datalog.Cudd as Cudd
 
 -- TODO (on the next episode):
 --   - interpreter
+--       - finish inferBitWidths
 --   - loop detection
 --   - generate SSA
 --   - constant propagation
@@ -43,7 +44,11 @@ main = do
   printProgram prog
   putStrLn ""
 
-  putStrLn (pretty (programToStatement prog))
+  let statement = programToStatement prog
+  let tacs = statementToTACs statement
+
+  putStrLn (pretty statement)
+  --putStrLn (pretty (inferBitWidths tacs))
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

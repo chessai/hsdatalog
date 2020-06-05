@@ -15,6 +15,7 @@ with {
         overrides = hself: hsuper: with super.haskell.lib; rec {
           cudd = hsuper.cudd.override { cudd = self.cudd; };
           vector-circular = hself.callPackage ./vector-circular.nix {};
+          disjoint-sets = hself.callPackage ./disjoint-sets.nix {};
           hedgehog-classes = doJailbreak (unmarkBroken hsuper.hedgehog-classes);
           streaming-cassava = dontCheck hsuper.streaming-cassava;
         };

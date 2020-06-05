@@ -10,7 +10,9 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 --------------------------------------------------------------------------------
 
@@ -21,7 +23,8 @@ module Datalog.Elaboration where
 import Control.Lens (Lens', unsafePartsOf, (%~), (&))
 import Control.Monad
 import Control.Monad.Fix (mfix)
-import Control.Monad.State.Class (get, modify)
+import Control.Monad.ST (ST, runST)
+import Control.Monad.State.Class (get, modify, put)
 import Control.Monad.State.Strict (State, evalState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
@@ -44,6 +47,7 @@ import qualified Data.List as List
 import qualified Data.List.Extra as Extra
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified DisjointSets
 
 --------------------------------------------------------------------------------
 
@@ -52,38 +56,49 @@ class Monad m => MonadTAC rel m | m -> rel where
   freshVar :: m Name
   eqRel    :: m rel
 
-newtype TacM a = TacM (State (Int, Int) a)
+  lookupType :: rel -> m Type
+  insertType :: rel -> Type -> m ()
+
+newtype TacM a = TacM (State (Int, Int, Map Rel Type) a)
   deriving newtype (Functor, Applicative, Monad)
 
-runTacM :: TacM a -> a
-runTacM (TacM action) = evalState action (0, 0)
+runTacM :: Map Rel Type -> TacM a -> a
+runTacM typeInfo (TacM action) = evalState action (0, 0, typeInfo)
 
 instance MonadTAC Rel TacM where
   freshRel = TacM $ do
-    result <- fst <$> get
-    modify (first (+1))
+    (result, x, y) <- get
+    put (result + 1, x, y)
     pure (ElaborationRel result)
 
   freshVar = TacM $ do
-    result <- snd <$> get
-    modify (second (+1))
+    (x, result, y) <- get
+    put (x, result + 1, y)
     pure (ElaborationName (Just result))
 
   eqRel = pure EqualityConstraint
+
+  lookupType rel = TacM $ do
+    (_, _, typs) <- get
+    pure (Map.findWithDefault (error "type information WRONG") rel typs)
+
+  insertType rel typ = TacM $ do
+    modify (\(x, y, typs) -> (x, y, Map.insert rel typ typs))
 
 instance (MonadTAC rel m) => MonadTAC rel (WriterT w m) where
   freshRel = lift freshRel
   freshVar = lift freshVar
   eqRel    = lift eqRel
 
-type SubgoalIndex = Int
+  lookupType rel = lift (lookupType rel)
+  insertType rel typ = lift (insertType rel typ)
 
 --------------------------------------------------------------------------------
 
 programToStatement
   :: Program Rel Name
   -> Statement Rel
-programToStatement (Program ds _) = runTacM $ do
+programToStatement (Program ds typs) = runTacM typs $ do
   statement <- (Block . map Block) <$> traverse iWantItAll ds
   let isParseRel :: Rel -> Bool
       isParseRel (ParseRel _) = True
@@ -277,6 +292,8 @@ selectConstants (Rule relH subgoals) = (Rule relH . flip zip (map snd subgoals))
       pure (Relation projectRel (filter isRight args))
 
 --------------------------------------------------------------------------------
+
+type SubgoalIndex = Int
 
 -- | Join each subgoal relation with each of the other subgoal relations,
 --   projecting away attributes as they become unnecessary.
@@ -532,5 +549,112 @@ used' d =
 
 setNub :: Ord a => [a] -> [a]
 setNub = Set.toList . Set.fromList
+
+inferBitWidths
+  :: forall rel
+  . (Ord rel, Pretty rel)
+  => Map rel Type
+  -> [TAC rel]
+  -> Map rel Int
+inferBitWidths typeInfo tacs = runST $ do
+  d <- DisjointSets.empty @_ @(Either [Int] rel)
+  let failure b = if b then pure () else error "DisjointSets failure"
+  forM_ tacs $ \(TAC rel alg) -> do
+    DisjointSets.insert d (Right rel)
+    forM_ (toList alg) (DisjointSets.insert d . Right)
+
+    case alg of
+      Not x -> do
+        failure =<< DisjointSets.union d (Right rel) (Right x)
+      Const constants -> do
+        let bitwidth = \case
+              ConstantBitString bs -> length bs
+              _ -> error "precondition violated"
+        let bitwidths = map bitwidth constants
+        DisjointSets.insert d (Left bitwidths)
+        failure =<< DisjointSets.union d (Right rel) (Left bitwidths)
+      Join _ _ _ -> do
+        pure ()
+      Union x y -> do
+        failure =<< DisjointSets.unions d (map Right [rel, x, y])
+      Project _ _ -> do
+        pure ()
+      Rename _ x -> do
+        failure =<< DisjointSets.union d (Right rel) (Right x)
+      Difference x y -> do
+        failure =<< DisjointSets.unions d (map Right [rel, x, y])
+      Select _ _ x -> do
+        failure =<< DisjointSets.union d (Right rel) (Right x)
+      Everything -> do
+        pure ()
+
+  forM_ tacs $ \(TAC rel alg) -> do
+    case alg of
+      Join (fromIntegral -> n) x y -> do
+        mtypx <- DisjointSets.find d (Right x)
+        mtypy <- DisjointSets.find d (Right y)
+        case (mtypx, mtypy) of
+          (Just (Left typx), Just (Left typy)) -> do
+            unless (drop (length typx - n) typx == take n typy) (error "inferBitWidths: join issues")
+            let typ' :: Either [Int] rel
+                typ' = Left (typx ++ drop n typy)
+            DisjointSets.insert d typ'
+            failure =<< DisjointSets.union d (Right rel) typ'
+          _ -> error $ "inferBitWidths: join failure. TAC: " ++ pretty (TAC rel alg)
+
+      Project attrs x -> do
+        DisjointSets.find d (Right x) >>= \case
+          Just (Left typ) -> do
+            let typ' :: Either [Int] rel
+                typ' = Left (map (typ !!) attrs)
+            DisjointSets.insert d typ'
+            failure =<< DisjointSets.union d (Right rel) typ'
+          _ -> error $ "inferBitWidths: project failure. TAC: " ++ pretty (TAC rel alg)
+      _ -> do
+        pure ()
+  undefined
+
+--------------------------------------------------------------------------------
+
+data Term v f = Var v | Fun f [Term v f]
+  deriving stock (Eq, Ord)
+
+data Equation v f = Equation (Term v f) (Term v f)
+
+type Subst v f = Map v (Term v f)
+
+unification :: forall v f. (Ord v, Ord f) => [Equation v f] -> Maybe (Subst v f)
+unification = go Map.empty
+  where
+    go :: Subst v f -> [Equation v f] -> Maybe (Subst v f)
+    go output [] = Just output
+    go output ((Equation lhs rhs) : rest) = do
+      case (lhs, rhs) of
+        _ | lhs == rhs -> go output rest
+        (Fun f sf, Fun g sg) -> do
+          guard (f == g)
+          guard (length sf == length sg)
+          go output (zipWith Equation sf sg ++ rest)
+        (Fun f s, Var v) -> do
+          go output (Equation (Var v) (Fun f s) : rest)
+        (Var v, term) -> do
+          guard (not (occurs v term))
+          let subst = Map.singleton v term
+          go (Map.unionWith (error "unification: this should not happen")
+              subst (Map.map (substituteInTerm subst) output))
+             (map (substituteInEquation subst) rest)
+
+occurs :: (Eq v) => v -> Term v f -> Bool
+occurs v (Var var) = var == v
+occurs v (Fun _ s) = any (occurs v) s
+
+substituteInTerm :: (Ord v) => Subst v f -> Term v f -> Term v f
+substituteInTerm s (Var    v) = fromMaybe (Var v) (Map.lookup v s)
+substituteInTerm s (Fun f cs) = Fun f (map (substituteInTerm s) cs)
+
+substituteInEquation :: (Ord v) => Subst v f -> Equation v f -> Equation v f
+substituteInEquation s (Equation lhs rhs) = Equation
+                                            (substituteInTerm s lhs)
+                                            (substituteInTerm s rhs)
 
 --------------------------------------------------------------------------------

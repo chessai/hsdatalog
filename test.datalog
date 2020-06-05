@@ -1,7 +1,11 @@
-ancestor : Relation(Int, Int, Int).
-ancestor(X, Y, K) :- parent(X, Y).
-ancestor(X, Y, K) :- parent(X, Z), ancestor(Z, Y, 0).
+ancestor : Relation(Int, Int).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 
+parent : Relation(Int, Int).
+neighbor : Relation(Int, Int).
+
+path : Relation(Int, Int).
 path(X, X).
 path(X, Y) :- neighbor(X, Y).
 path(X, Y) :- path(X, Z), path(Z, Y).

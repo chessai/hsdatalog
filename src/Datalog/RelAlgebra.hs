@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DeriveTraversable   #-}
 {-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Datalog.RelAlgebra where
@@ -70,6 +71,12 @@ data Statement rel
   | Assignment (TAC rel)
   deriving stock (Eq, Ord, Show, Generic)
   deriving stock (Functor, Foldable, Traversable)
+
+statementToTACs :: Statement rel -> [TAC rel]
+statementToTACs = \case
+  While _ s -> statementToTACs s
+  Block block -> concatMap statementToTACs block
+  Assignment tac -> [tac]
 
 newtype Tuple = Tuple [Constant]  deriving (Eq, Ord, Show)
 newtype Table = Table (Set Tuple) deriving (Eq, Ord, Show)

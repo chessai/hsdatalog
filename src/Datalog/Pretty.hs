@@ -6,6 +6,7 @@ module Datalog.Pretty where
 import Data.Bool (bool)
 import Data.Int (Int8)
 import Data.List (intercalate)
+import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Text (Text)
 import Datalog.Graph
@@ -13,6 +14,7 @@ import Datalog.RelAlgebra
 import Datalog.Syntax
 import Datalog.TypeCheck
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
 class Pretty a where
@@ -35,6 +37,9 @@ instance Pretty a => Pretty [a] where
 
 instance (Pretty a, Pretty b) => Pretty (Either a b) where
   pretty = either pretty pretty
+
+instance (Pretty a, Pretty b) => Pretty (a, b) where
+  pretty (x, y) = "(" ++ pretty x ++ ", " ++ pretty y ++ ")"
 
 instance Pretty Constant where
   pretty = \case
@@ -89,6 +94,9 @@ instance Pretty Rel where
     EqualityConstraint -> "~"
     ElaborationRel i -> show i
     ParseRel s -> s
+
+instance (Pretty k, Pretty v) => Pretty (Map k v) where
+  pretty = pretty . Map.toList
 
 prettyExpr :: (Pretty rel, Pretty var) => Expr rel var -> String
 prettyExpr (rel, negated) = bool "!" "" (isNotNegated negated) ++ pretty rel
