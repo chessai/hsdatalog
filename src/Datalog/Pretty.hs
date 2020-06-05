@@ -4,6 +4,7 @@
 module Datalog.Pretty where
 
 import Data.Bool (bool)
+import Data.Int (Int8)
 import Data.List (intercalate)
 import Data.Maybe
 import Data.Text (Text)
@@ -18,6 +19,9 @@ class Pretty a where
   pretty :: a -> String
 
 instance Pretty Int where
+  pretty = show
+
+instance Pretty Int8 where
   pretty = show
 
 instance Pretty Bool where

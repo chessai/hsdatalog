@@ -29,6 +29,7 @@ import Control.Monad.State.Strict (State, evalState, execState)
 import Data.Bifunctor (Bifunctor, bimap, first)
 import Data.Data (Data)
 import Data.Foldable (toList)
+import Data.Int (Int8)
 import Data.Map.Strict (Map)
 import Data.Maybe
 import Data.Set (Set)
@@ -55,7 +56,7 @@ data Rel = EqualityConstraint | ElaborationRel Int | ParseRel String
   deriving stock (Eq, Ord, Show, Data)
 
 data Constant
-  = ConstantInt Int
+  = ConstantInt Int8 -- FIXME: change back to Int, only Int8 for ease of reading while developing
   | ConstantBool Bool
   | ConstantBitString [Bool]
   deriving stock (Eq, Ord, Show, Generic, Data)

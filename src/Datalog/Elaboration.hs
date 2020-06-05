@@ -26,6 +26,7 @@ import Control.Monad.State.Strict (State, evalState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.CPS (WriterT, execWriterT, tell)
 import Data.Bifunctor (Bifunctor, bimap, first, second)
+import Data.Bits (finiteBitSize, testBit)
 import Data.Data (Data)
 import Data.Data.Lens
 import Data.Either
@@ -108,8 +109,6 @@ renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
 
 --------------------------------------------------------------------------------
 
--- TODO: add another pass to turn all constants in bitstrings, to simplify
--- things in the interpreter
 iWantItAll
   :: forall m rel
   . (Data rel, Eq rel, MonadTAC rel m)
@@ -117,7 +116,8 @@ iWantItAll
   -> m [Statement rel]
 iWantItAll d = execWriterT $ do
   unifyHeadRelation =<< flip mcompose d
-    [ removeDuplication
+    [ canoniseConstants
+    , removeDuplication
     , eliminateNegation
     , removeUnused
     , projectUnused
@@ -430,6 +430,22 @@ renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
 
   pure (Rule (Relation relH argsH) [(Relation renameRel argsH, NotNegated)])
 renameToHead _ = error "renameToHead: precondition violation"
+
+--------------------------------------------------------------------------------
+
+canoniseConstants
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m (Declaration rel Name)
+canoniseConstants (Rule relH exprs) = do
+  let fixConstant :: Constant -> Constant
+      fixConstant = \case
+        ConstantBitString b -> ConstantBitString b
+        ConstantInt i -> ConstantBitString (map (testBit i) [0..finiteBitSize i - 1])
+        ConstantBool b -> ConstantBitString [b]
+      fixRelation :: Relation rel Name -> Relation rel Name
+      fixRelation (Relation rel args) = Relation rel (map (either (Left . fixConstant) Right) args)
+  pure (Rule (fixRelation relH) (map (first fixRelation) exprs))
 
 --------------------------------------------------------------------------------
 
