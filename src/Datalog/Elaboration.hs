@@ -41,7 +41,9 @@ import Data.Typeable (Typeable)
 import Datalog.Pretty
 import Datalog.RelAlgebra
 import Datalog.Syntax
+import Datalog.TypeCheck
 import Debug.Trace
+import GHC.Natural (Natural)
 
 import qualified Data.List as List
 import qualified Data.List.Extra as Extra
@@ -54,10 +56,40 @@ import qualified DisjointSets
 class Monad m => MonadTAC rel m | m -> rel where
   freshRel :: m rel
   freshVar :: m Name
-  eqRel    :: m rel
+  eqRel    :: Type -> m rel
 
   lookupType :: rel -> m Type
   insertType :: rel -> Type -> m ()
+
+copyType :: MonadTAC rel m => (Type -> Type) -> rel -> rel -> m ()
+copyType changeType oldRel newRel = do
+  typ <- lookupType oldRel
+  insertType newRel (changeType typ)
+
+copyType2 :: MonadTAC rel m => (Type -> Type -> Type) -> rel -> rel -> rel -> m ()
+copyType2 changeType x y newRel = do
+  typx <- lookupType x
+  typy <- lookupType y
+  insertType newRel (changeType typx typy)
+
+notARelationError :: String -> a
+notARelationError s = error $ s ++ ": Not a relation!"
+
+projectType :: [Attr] -> Type -> Type
+projectType attrs = \case
+  TypeRelation typs -> TypeRelation (map (typs !!) attrs)
+  _ -> notARelationError "projectType"
+
+renameType :: AttrPermutation -> Type -> Type
+renameType perm = \case
+  TypeRelation typs -> TypeRelation (applyPermutation perm typs)
+  _ -> notARelationError "renameType"
+
+joinType :: Natural -> Type -> Type -> Type
+joinType (fromIntegral -> n) (TypeRelation x) (TypeRelation y)
+  | drop (length x - n) x == take n y = TypeRelation (x ++ drop n y)
+  | otherwise = error $ "joinType: malformed join"
+joinType _ _ _ = notARelationError "joinType"
 
 newtype TacM a = TacM (State (Int, Int, Map Rel Type) a)
   deriving newtype (Functor, Applicative, Monad)
@@ -76,51 +108,37 @@ instance MonadTAC Rel TacM where
     put (x, result + 1, y)
     pure (ElaborationName (Just result))
 
-  eqRel = pure EqualityConstraint
+  eqRel typ = pure (EqualityConstraint typ)
 
   lookupType rel = TacM $ do
     (_, _, typs) <- get
-    pure (Map.findWithDefault (error "type information WRONG") rel typs)
+    pure (Map.findWithDefault (error ("type information wrong: " ++ pretty rel)) rel typs)
 
   insertType rel typ = TacM $ do
     modify (\(x, y, typs) -> (x, y, Map.insert rel typ typs))
 
 instance (MonadTAC rel m) => MonadTAC rel (WriterT w m) where
-  freshRel = lift freshRel
-  freshVar = lift freshVar
-  eqRel    = lift eqRel
+  freshRel  = lift freshRel
+  freshVar  = lift freshVar
+  eqRel typ = lift (eqRel typ)
 
   lookupType rel = lift (lookupType rel)
   insertType rel typ = lift (insertType rel typ)
 
 --------------------------------------------------------------------------------
 
-programToStatement
+programToRelProgram
   :: Program Rel Name
-  -> Statement Rel
-programToStatement (Program ds typs) = runTacM typs $ do
+  -> RelProgram Rel
+programToRelProgram (Program ds typs) = runTacM typs $ do
   statement <- (Block . map Block) <$> traverse iWantItAll ds
   let isParseRel :: Rel -> Bool
       isParseRel (ParseRel _) = True
       isParseRel _ = False
-  pure (While (filter isParseRel (setNub (toList statement))) statement)
-
---------------------------------------------------------------------------------
-
--- TODO: I think this function is probably unnecessary, we should preserve
--- ParseNames for as long as we possibly can.
-renameProgram
-  :: forall rel var. (Ord var) => Program rel var -> Program rel Name
-renameProgram (Program ds ts) = Program (evalState (traverse go ds) 0) ts
-  where
-    go :: Declaration rel var -> State Int (Declaration rel Name)
-    go d = do
-      let (usedOnce, usedMany) = used d
-      n <- get
-      let renamings = Map.fromList
-                      (map (,Nothing) usedOnce ++ zip usedMany (Just <$> [n..]))
-      modify (+ length usedMany)
-      pure (fmap (ElaborationName . (renamings Map.!)) d)
+  (_, _, typs') <- TacM get
+  pure $ RelProgram
+         (While (filter isParseRel (setNub (toList statement))) statement)
+         typs'
 
 --------------------------------------------------------------------------------
 
@@ -155,6 +173,22 @@ fixpoint f x0 = do
 
 --------------------------------------------------------------------------------
 
+canoniseConstants
+  :: (MonadTAC rel m)
+  => Declaration rel Name
+  -> WriterT [Statement rel] m (Declaration rel Name)
+canoniseConstants (Rule relH exprs) = do
+  let fixConstant :: Constant -> Constant
+      fixConstant = \case
+        ConstantBitString b -> ConstantBitString b
+        ConstantInt i -> ConstantBitString (map (testBit i) [0..finiteBitSize i - 1])
+        ConstantBool b -> ConstantBitString [b]
+      fixRelation :: Relation rel Name -> Relation rel Name
+      fixRelation (Relation rel args) = Relation rel (map (either (Left . fixConstant) Right) args)
+  pure (Rule (fixRelation relH) (map (first fixRelation) exprs))
+
+--------------------------------------------------------------------------------
+
 -- remove duplication in the head relation and subgoals
 removeDuplication
   :: forall m rel
@@ -169,7 +203,7 @@ removeDuplication (Rule relH ss) = do
   where
     impl :: [Expr rel Name] -> WriterT [Statement rel] m [Expr rel Name]
     impl [] = pure []
-    impl (subgoal : subgoals) = do
+    impl (subgoal@(Relation relS argsS, _) : subgoals) = do
       let allVars :: Map Name Int
           allVars =
             Map.fromList
@@ -178,9 +212,19 @@ removeDuplication (Rule relH ss) = do
             $ Map.fromListWith (+) (zip (toList (fst subgoal)) (repeat 1))
       names <- traverse (`replicateM` freshVar) allVars
 
-      let mkEquality (x, y) = do
-            rel <- eqRel
-            pure (Relation rel [Right x, Right y], NotNegated)
+      relstyps <- lookupType relS >>= \case
+        TypeRelation typs -> pure typs
+        _ -> notARelationError "generateEverythings"
+      let typs :: Map Name Type
+          typs =
+             Map.fromList
+             $ mapMaybe (\(a,r) -> either (const Nothing) (Just . (,r)) a)
+             $ zip argsS relstyps
+      let mkEquality (usedName, synthesisedName) = do
+            let typeUsed = typs Map.! usedName
+            rel <- eqRel typeUsed
+            insertType rel (TypeRelation [typeUsed, typeUsed])
+            pure (Relation rel [Right usedName, Right synthesisedName], NotNegated)
       equalities <- traverse mkEquality (concatMap sequenceA (Map.toList names))
 
       let modifyName :: Name -> State (Map Name Int) Name
@@ -214,6 +258,7 @@ eliminateNegation (Rule relH subgoals) = Rule relH <$> traverse go subgoals
     go (relation, NotNegated) = pure (relation, NotNegated)
     go (Relation rel args, Negated) = do
       nrel <- freshRel
+      copyType id rel nrel
       tell [Assignment (TAC nrel (Not rel))]
       pure (Relation nrel args, NotNegated)
 
@@ -254,6 +299,7 @@ projectUnused (Rule relH subgoals)
       | otherwise = do
           let positions = List.findIndices (not . isUnused) vars
           rel' <- freshRel
+          copyType (projectType positions) rel rel'
           tell [Assignment (TAC rel' (Project positions rel))]
           pure (Relation rel' (filter (not . isUnused) vars))
 
@@ -276,18 +322,19 @@ selectConstants (Rule relH subgoals) = (Rule relH . flip zip (map snd subgoals))
           constants =
             rights $ map (sequenceA . fmap flipEither) $ zip [0..] args
       rels <- replicateM (length constants) freshRel
-      let selects :: [Statement rel]
-          selects = zipWith3 (\prevRel newRel (attr, constant) ->
-                                Assignment
-                                $ TAC newRel
-                                $ Select attr constant prevRel)
-                             (rel : init rels)
-                             rels
-                             constants
+      let mkSelect :: rel -> rel -> (Attr, Constant) -> WriterT [Statement rel] m (Statement rel)
+          mkSelect prevRel newRel (attr, constant) = do
+            copyType id prevRel newRel
+            pure $ Assignment
+                 $ TAC newRel
+                 $ Select attr constant prevRel
+      selects <- zipWith3M mkSelect (rel : init rels) rels constants
       tell selects
       projectRel <- freshRel
-      tell [Assignment (TAC projectRel
-                        (Project (List.findIndices isRight args) (last rels)))]
+      let attrs = List.findIndices isRight args
+      let lastSelectRel = last rels
+      copyType (projectType attrs) lastSelectRel projectRel
+      tell [Assignment (TAC projectRel (Project attrs lastSelectRel))]
 
       pure (Relation projectRel (filter isRight args))
 
@@ -308,10 +355,13 @@ joinSubgoals
 joinSubgoals (Rule relH subgoals) | not (needsJoin subgoals) = pure (Rule relH subgoals)
 joinSubgoals d@(Rule relH subgoals) = do
   renamedLHS <- freshRel
+  copyType (renameType permutationLHS) lhsRel renamedLHS
   tell [Assignment (TAC renamedLHS (Rename permutationLHS lhsRel))]
   renamedRHS <- freshRel
+  copyType (renameType permutationRHS) rhsRel renamedRHS
   tell [Assignment (TAC renamedRHS (Rename permutationRHS rhsRel))]
   joined <- freshRel
+  copyType2 (joinType (fromIntegral joinSize)) renamedLHS renamedRHS joined
   tell [Assignment (TAC joined (Join (fromIntegral joinSize)
                                 renamedLHS renamedRHS))]
 
@@ -379,12 +429,21 @@ generateEverythings
   -> WriterT [Statement rel] m (Declaration rel Name)
 generateEverythings (Rule (Relation relH argsH) exprs) = do
   rel <- freshRel
+  relhtyps <- lookupType relH >>= \case
+    TypeRelation typs -> pure typs
+    _ -> notARelationError "generateEverythings"
+  let typs :: Map (Either Constant Name) Type
+      typs = Map.fromList $ filter (isRight . fst) $ zip argsH relhtyps
+
   let lhsVars :: Set Name
       lhsVars = Set.fromList $ concatMap toList argsH
       rhsVars :: Set Name
       rhsVars = Set.fromList $ concatMap (toList . fst) exprs
-      args :: [Either a Name]
+      args :: [Either Constant Name]
       args = map Right $ Set.toList $ lhsVars `Set.difference` rhsVars
+  insertType rel
+    $ TypeRelation
+    $ map (\arg -> Map.findWithDefault (error "generateEverythings") arg typs) args
   tell [Assignment (TAC rel Everything)]
   pure (Rule (Relation relH argsH) ((Relation rel args, NotNegated) : exprs))
 
@@ -400,6 +459,7 @@ joinEverythingElse (Rule relH (exprA : exprB : rest)) = do
   let (Relation relA argsA, _) = exprA
   let (Relation relB argsB, _) = exprB
   joined <- freshRel
+  copyType2 (joinType 0) relA relB joined
   tell [Assignment (TAC joined (Join 0 relA relB))]
   joinEverythingElse
     $ Rule relH ((Relation joined (argsA ++ argsB), NotNegated) : rest)
@@ -429,12 +489,15 @@ renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
       constantsInArgsH = lefts argsH
 
   projectedRel <- freshRel
+  copyType (projectType thingsInArgsHButNotInArgs) rel projectedRel
   tell [Assignment (TAC projectedRel (Project thingsInArgsHButNotInArgs rel))]
 
   constRel <- freshRel
+  insertType constRel (TypeRelation (map constantToType constantsInArgsH))
   tell [Assignment (TAC constRel (Const constantsInArgsH))]
 
   joinRel <- freshRel
+  copyType2 (joinType 0) projectedRel constRel joinRel
   tell [Assignment (TAC joinRel (Join 0 projectedRel constRel))]
 
   -- needs to be a permutation of argsH
@@ -443,26 +506,11 @@ renameToHead (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
 
   let perm = fromMaybe (error "renameToHead: computePermutation did not succeed") (computePermutation args' argsH)
   renameRel <- freshRel
+  copyType (renameType perm) joinRel renameRel
   tell [Assignment (TAC renameRel (Rename perm joinRel))]
 
   pure (Rule (Relation relH argsH) [(Relation renameRel argsH, NotNegated)])
 renameToHead _ = error "renameToHead: precondition violation"
-
---------------------------------------------------------------------------------
-
-canoniseConstants
-  :: (MonadTAC rel m)
-  => Declaration rel Name
-  -> WriterT [Statement rel] m (Declaration rel Name)
-canoniseConstants (Rule relH exprs) = do
-  let fixConstant :: Constant -> Constant
-      fixConstant = \case
-        ConstantBitString b -> ConstantBitString b
-        ConstantInt i -> ConstantBitString (map (testBit i) [0..finiteBitSize i - 1])
-        ConstantBool b -> ConstantBitString [b]
-      fixRelation :: Relation rel Name -> Relation rel Name
-      fixRelation (Relation rel args) = Relation rel (map (either (Left . fixConstant) Right) args)
-  pure (Rule (fixRelation relH) (map (first fixRelation) exprs))
 
 --------------------------------------------------------------------------------
 
@@ -550,69 +598,8 @@ used' d =
 setNub :: Ord a => [a] -> [a]
 setNub = Set.toList . Set.fromList
 
-inferBitWidths
-  :: forall rel
-  . (Ord rel, Pretty rel)
-  => Map rel Type
-  -> [TAC rel]
-  -> Map rel Int
-inferBitWidths typeInfo tacs = runST $ do
-  d <- DisjointSets.empty @_ @(Either [Int] rel)
-  let failure b = if b then pure () else error "DisjointSets failure"
-  forM_ tacs $ \(TAC rel alg) -> do
-    DisjointSets.insert d (Right rel)
-    forM_ (toList alg) (DisjointSets.insert d . Right)
-
-    case alg of
-      Not x -> do
-        failure =<< DisjointSets.union d (Right rel) (Right x)
-      Const constants -> do
-        let bitwidth = \case
-              ConstantBitString bs -> length bs
-              _ -> error "precondition violated"
-        let bitwidths = map bitwidth constants
-        DisjointSets.insert d (Left bitwidths)
-        failure =<< DisjointSets.union d (Right rel) (Left bitwidths)
-      Join _ _ _ -> do
-        pure ()
-      Union x y -> do
-        failure =<< DisjointSets.unions d (map Right [rel, x, y])
-      Project _ _ -> do
-        pure ()
-      Rename _ x -> do
-        failure =<< DisjointSets.union d (Right rel) (Right x)
-      Difference x y -> do
-        failure =<< DisjointSets.unions d (map Right [rel, x, y])
-      Select _ _ x -> do
-        failure =<< DisjointSets.union d (Right rel) (Right x)
-      Everything -> do
-        pure ()
-
-  forM_ tacs $ \(TAC rel alg) -> do
-    case alg of
-      Join (fromIntegral -> n) x y -> do
-        mtypx <- DisjointSets.find d (Right x)
-        mtypy <- DisjointSets.find d (Right y)
-        case (mtypx, mtypy) of
-          (Just (Left typx), Just (Left typy)) -> do
-            unless (drop (length typx - n) typx == take n typy) (error "inferBitWidths: join issues")
-            let typ' :: Either [Int] rel
-                typ' = Left (typx ++ drop n typy)
-            DisjointSets.insert d typ'
-            failure =<< DisjointSets.union d (Right rel) typ'
-          _ -> error $ "inferBitWidths: join failure. TAC: " ++ pretty (TAC rel alg)
-
-      Project attrs x -> do
-        DisjointSets.find d (Right x) >>= \case
-          Just (Left typ) -> do
-            let typ' :: Either [Int] rel
-                typ' = Left (map (typ !!) attrs)
-            DisjointSets.insert d typ'
-            failure =<< DisjointSets.union d (Right rel) typ'
-          _ -> error $ "inferBitWidths: project failure. TAC: " ++ pretty (TAC rel alg)
-      _ -> do
-        pure ()
-  undefined
+zipWith3M :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
+zipWith3M f as bs cs = sequenceA (zipWith3 f as bs cs)
 
 --------------------------------------------------------------------------------
 

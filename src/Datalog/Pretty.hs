@@ -91,9 +91,14 @@ instance (Pretty rel) => Pretty (TAC rel) where
 
 instance Pretty Rel where
   pretty = \case
-    EqualityConstraint -> "~"
+    EqualityConstraint typ -> "~ @" ++ pretty typ
     ElaborationRel i -> show i
     ParseRel s -> s
+
+instance (Pretty rel) => Pretty (RelProgram rel) where
+  pretty (RelProgram statement typs) = unlines (map (uncurry prettyType) (Map.toList typs))
+    ++ "\n"
+    ++ pretty statement
 
 instance (Pretty k, Pretty v) => Pretty (Map k v) where
   pretty = pretty . Map.toList

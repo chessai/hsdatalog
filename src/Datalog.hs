@@ -44,11 +44,10 @@ main = do
   printProgram prog
   putStrLn ""
 
-  let statement = programToStatement prog
-  let tacs = statementToTACs statement
+  let relProgram@(RelProgram statement typs) = programToRelProgram prog
+  --let tacs = statementToTACs statement
 
-  putStrLn (pretty statement)
-  --putStrLn (pretty (inferBitWidths tacs))
+  putStrLn (pretty relProgram)
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

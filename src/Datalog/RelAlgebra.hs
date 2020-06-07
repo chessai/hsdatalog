@@ -36,6 +36,12 @@ data RelAlgebra rel
   deriving stock (Eq, Ord, Show, Generic)
   deriving stock (Functor, Foldable, Traversable)
 
+data RelProgram rel = RelProgram
+  { relProgramStatement :: Statement rel
+  , relProgramTypes :: Map rel Type
+  }
+  deriving stock (Eq, Ord, Show, Generic)
+
 {-
 interpret :: forall m rel attr. (Monad m, Ord rel) => [(rel, RelAlgebra attr rel)] -> Map rel DDNode -> CuddT m (Map rel DDNode)
 interpret tacs m = foldlM (flip (uncurry go)) m tacs

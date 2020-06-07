@@ -52,7 +52,7 @@ data Name
   | ElaborationName (Maybe Var)
   deriving stock (Eq, Ord, Show, Generic, Data)
 
-data Rel = EqualityConstraint | ElaborationRel Int | ParseRel String
+data Rel = EqualityConstraint Type | ElaborationRel Int | ParseRel String
   deriving stock (Eq, Ord, Show, Data)
 
 data Constant
@@ -102,7 +102,7 @@ data Type
     -- ^ used during type inference
   | TypeRelation [Type]
     -- ^ top level type signature
-  deriving stock (Eq, Show, Generic, Data)
+  deriving stock (Eq, Ord, Show, Generic, Data)
 
 --------------------------------------------------------
 
