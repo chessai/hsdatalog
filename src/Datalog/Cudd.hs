@@ -2,32 +2,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 
+-- TODO: add state token to DDNode so they cannot escape my mouth after chewing
 module Datalog.Cudd
-  ( CuddT(..)
-  , chewT, chewWithT
-
-  , Cudd
-  , chew, chewWith
-
-
-  , ithVar
-
-  , and, or, not, nand, nor, xor, xnor
-
-  , permute
-
-  , eq, gt
-
-  , restrict
-  , restrict'
-
-  , andAbstract
-  , xorExistAbstract
-  , lEq
-
+  ( module Datalog.Cudd
     -- * Re-exports
   , DDManager
   , DDNode
+  , SatBit
   ) where
 
 import Control.Monad.Reader (ReaderT, runReaderT)

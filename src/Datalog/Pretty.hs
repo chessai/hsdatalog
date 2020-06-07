@@ -3,6 +3,7 @@
 
 module Datalog.Pretty where
 
+import Cudd.Cudd (SatBit (..))
 import Data.Bool (bool)
 import Data.Int (Int8)
 import Data.List (intercalate)
@@ -59,7 +60,6 @@ instance Pretty Type where
     TypeInt -> "Int"
     TypeBool -> "Bool"
     TypeBitString n -> "BitString " ++ pretty n
-    TypeVar _ -> "<inference type>"
     TypeRelation tys -> "Relation(" ++ intercalate ", " (map pretty tys) ++ ")"
 
 instance Pretty Name where
@@ -92,7 +92,7 @@ instance (Pretty rel) => Pretty (TAC rel) where
 instance Pretty Rel where
   pretty = \case
     EqualityConstraint typ -> "~ @" ++ pretty typ
-    ElaborationRel i -> show i
+    ElaborationRel i -> "t" ++ showSubscript i
     ParseRel s -> s
 
 instance (Pretty rel) => Pretty (RelProgram rel) where
@@ -113,6 +113,12 @@ prettyGraph :: (Pretty node, Pretty weight) => Graph node weight -> String
 prettyGraph = unlines . map go . edges
   where
     go (source, target, weight) = pretty source ++ " -> " ++ pretty target ++ "; [" ++ pretty weight ++ "]"
+
+instance Pretty SatBit where
+  pretty = \case
+    Zero -> "0"
+    One -> "1"
+    DontCare -> "X"
 
 showSubscript :: (Integral a, Show a) => a -> String
 showSubscript = map toSubscript . show

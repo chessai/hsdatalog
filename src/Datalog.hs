@@ -19,6 +19,7 @@ import Datalog.Cudd (CuddT, DDNode)
 import Datalog.CycleEnumeration
 import Datalog.Elaboration
 import Datalog.Graph
+import Datalog.Interpreter
 import Datalog.Pretty
 import Datalog.RelAlgebra
 import Datalog.Stratification
@@ -45,9 +46,19 @@ main = do
   putStrLn ""
 
   let relProgram@(RelProgram statement typs) = programToRelProgram prog
-  --let tacs = statementToTACs statement
+  -- let tacs = statementToTACs statement
+  -- let b = [True, False, True, False, True, False, True, False]
+  -- let c = replicate 2 (ConstantBitString b)
+  let bdd = interpretProgram relProgram
+              -- $ RelProgram
+              -- (Assignment (TAC (ElaborationRel 0) (Const c)))
+              -- (Map.singleton (ElaborationRel 0) (TypeRelation [TypeInt, TypeInt]))
+
 
   putStrLn (pretty relProgram)
+  forM_ (Map.toList bdd) $ \(rel, sats) -> do
+    forM_ sats $ \sat -> do
+      putStrLn $ pretty rel ++ "[" ++ concatMap pretty sat ++ "]"
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do

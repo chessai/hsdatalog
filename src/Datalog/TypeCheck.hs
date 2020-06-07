@@ -48,12 +48,6 @@ positionTypes userWrittenTypes (Rule relH exprs) = do
         Just typ -> do
           undefined
 
-constantToType :: Constant -> Type
-constantToType = \case
-  ConstantInt _ -> TypeInt
-  ConstantBool _ -> TypeBool
-  ConstantBitString s -> TypeBitString (length s)
-
 variablePositions :: forall rel var. (Ord var) => Declaration rel var -> Map var (Set Position)
 variablePositions (Rule (Relation _ vars) exprs) = Map.unionWith Set.union lhsPositions rhsPositions
   where

@@ -59,6 +59,7 @@ library
     Datalog.Elaboration
     Datalog.Graph
     Datalog.ID3
+    Datalog.Interpreter
     Datalog.Pretty
     Datalog.RelAlgebra
     Datalog.Stratification

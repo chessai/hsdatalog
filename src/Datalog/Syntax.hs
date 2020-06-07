@@ -19,6 +19,10 @@ module Datalog.Syntax
   , Name(..)
   , Rel(..)
 
+  , typeBitWidth
+  , constantBitWidth
+  , constantToType
+
   , parseProgram
   , isNotNegated
   ) where
@@ -98,11 +102,27 @@ data Type
     -- ^ boolean
   | TypeBitString Int
     -- ^ bit strings of length n
-  | TypeVar Int
-    -- ^ used during type inference
   | TypeRelation [Type]
     -- ^ top level type signature
   deriving stock (Eq, Ord, Show, Generic, Data)
+
+--------------------------------------------------------
+
+typeBitWidth :: Type -> Int
+typeBitWidth = \case
+  TypeInt -> 8
+  TypeBool -> 1
+  TypeBitString n -> n
+  TypeRelation n -> sum (map typeBitWidth n)
+
+constantBitWidth :: Constant -> Int
+constantBitWidth = typeBitWidth . constantToType
+
+constantToType :: Constant -> Type
+constantToType = \case
+  ConstantInt _ -> TypeInt
+  ConstantBool _ -> TypeBool
+  ConstantBitString s -> TypeBitString (length s)
 
 --------------------------------------------------------
 
