@@ -144,7 +144,7 @@ programToRelProgram (Program ds typs) = runTacM typs $ do
 
 iWantItAll
   :: forall m rel
-  . (Data rel, Eq rel, MonadTAC rel m)
+  . (Data rel, Eq rel, MonadTAC rel m, Pretty rel)
   => Declaration rel Name
   -> m [Statement rel]
 iWantItAll d = execWriterT $ do
@@ -428,7 +428,6 @@ generateEverythings
   => Declaration rel Name
   -> WriterT [Statement rel] m (Declaration rel Name)
 generateEverythings (Rule (Relation relH argsH) exprs) = do
-  rel <- freshRel
   relhtyps <- lookupType relH >>= \case
     TypeRelation typs -> pure typs
     _ -> notARelationError "generateEverythings"
@@ -441,11 +440,16 @@ generateEverythings (Rule (Relation relH argsH) exprs) = do
       rhsVars = Set.fromList $ concatMap (toList . fst) exprs
       args :: [Either Constant Name]
       args = map Right $ Set.toList $ lhsVars `Set.difference` rhsVars
-  insertType rel
-    $ TypeRelation
-    $ map (\arg -> Map.findWithDefault (error "generateEverythings") arg typs) args
-  tell [Assignment (TAC rel Everything)]
-  pure (Rule (Relation relH argsH) ((Relation rel args, NotNegated) : exprs))
+  if not (null args)
+    then do
+      rel <- freshRel
+      insertType rel
+        $ TypeRelation
+        $ map (\arg -> Map.findWithDefault (error "generateEverythings") arg typs) args
+      tell [Assignment (TAC rel Everything)]
+      pure (Rule (Relation relH argsH) ((Relation rel args, NotNegated) : exprs))
+    else do
+      pure (Rule (Relation relH argsH) exprs)
 
 --------------------------------------------------------------------------------
 
@@ -515,16 +519,20 @@ renameToHead _ = error "renameToHead: precondition violation"
 --------------------------------------------------------------------------------
 
 unifyHeadRelation
-  :: (MonadTAC rel m)
+  :: (MonadTAC rel m, Pretty rel)
   => Declaration rel Name
   -> WriterT [Statement rel] m ()
--- we don't seem to run into this in practise?
---unifyHeadRelation (Rule rel []) = do
---  error $ pretty rel
-unifyHeadRelation (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
-  unless (args == argsH) (error "unifyHeadRelation: precondition violation")
+unifyHeadRelation (Rule (Relation relH argsH) []) = do
+  unless (all isLeft argsH) $ error "unifyHeadRelation: argsH should be made up entirely constants, but is not"
+  rel <- freshRel
+  let consts = lefts argsH
+  tell [Assignment (TAC rel (Const consts))]
   tell [Assignment (TAC relH (Union relH rel))]
-unifyHeadRelation _ = error "unifyHeadRelation: precondition violation"
+  insertType rel (TypeRelation (map constantToType consts))
+unifyHeadRelation (Rule (Relation relH argsH) [(Relation rel args, NotNegated)]) = do
+  unless (args == argsH) (error "unifyHeadRelation: precondition violation: arguments not equal")
+  tell [Assignment (TAC relH (Union relH rel))]
+unifyHeadRelation r = error $ "unifyHeadRelation: precondition violation: more than one relation: " ++ pretty r
 
 --------------------------------------------------------------------------------
 
@@ -532,18 +540,6 @@ isNameUnused :: Name -> Bool
 isNameUnused = \case
   ParseName       m -> isNothing m
   ElaborationName m -> isNothing m
-
---------------------------------------------------------------------------------
-
--- | Compute the permutation from one list to another, if one exists.
---
--- Laws:
--- 1. If @Just p = computePermutation xs ys@, then @ys = applyPermutation p xs@.
-computePermutation :: Eq a => [a] -> [a] -> Maybe AttrPermutation
-computePermutation xs ys = mapM (\x -> List.elemIndex x ys) xs
-
-applyPermutation :: AttrPermutation -> [a] -> [a]
-applyPermutation perm xs = map (xs !!) perm
 
 --------------------------------------------------------------------------------
 

@@ -13,7 +13,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
-import Datalog.Cudd (Cudd, DDNode, SatBit)
+import Datalog.Cudd (BDD, Cudd, SatBit)
 import Datalog.Elaboration
 import Datalog.RelAlgebra
 import Datalog.Syntax
@@ -29,7 +29,7 @@ everythingIsTyped (RelProgram statement typs)
 assert :: Applicative m => String -> Bool -> m ()
 assert s b = if b then pure () else error ("ASSERTION FAILED: " ++ s)
 
-type Interpret rel = StateT (Map rel DDNode) Cudd
+type Interpret rel = StateT (Map rel BDD) Cudd
 
 interpretProgram :: (Ord rel) => RelProgram rel -> Map rel [[SatBit]]
 interpretProgram = runInterpret . interpret
@@ -43,8 +43,8 @@ interpret :: forall rel. (Ord rel) => RelProgram rel -> Interpret rel ()
 interpret relProgram@(RelProgram statement typs) = do
   assert "everything in the program is typed" (everythingIsTyped relProgram)
 
-  alwaysFalse <- lift Cudd.readLogicZero
-  alwaysTrue <- lift Cudd.readOne
+  alwaysFalse <- lift Cudd.false
+  alwaysTrue <- lift Cudd.true
   let go :: Statement rel -> Interpret rel ()
       go = \case
         While rels stmt -> do
@@ -57,8 +57,8 @@ interpret relProgram@(RelProgram statement typs) = do
         Assignment (TAC lhs rhs) -> do
           m <- get
           let lookupNode rel = Map.findWithDefault alwaysFalse rel m
-          let relToDDNode :: RelAlgebra rel -> Cudd DDNode
-              relToDDNode = \case
+          let relToBDD :: RelAlgebra rel -> Cudd BDD
+              relToBDD = \case
                 Not rel -> do
                   Cudd.not (lookupNode rel)
                 Const constants -> do
@@ -73,6 +73,7 @@ interpret relProgram@(RelProgram statement typs) = do
                   let TypeRelation reltypsy = typs Map.! y
                   let shiftY = sum $ map typeBitWidth $ take (length reltypsx - n) reltypsx
                   let ybits = sum $ map typeBitWidth reltypsy
+                  void $ Cudd.ithVar (shiftY + ybits + 1)
                   Cudd.and (lookupNode x) =<< Cudd.permute (lookupNode y) [shiftY .. shiftY + ybits]
                 Union x y -> do
                   Cudd.or (lookupNode x) (lookupNode y)
@@ -111,10 +112,10 @@ interpret relProgram@(RelProgram statement typs) = do
                 Select attr (ConstantBitString bs) rel -> do
                   let TypeRelation reltyps = typs Map.! rel
                   let offset = sum $ map typeBitWidth $ take (attr - 1) reltyps
-                  Cudd.restrict' (lookupNode rel) (Map.fromList (zip [offset..] bs))
+                  Cudd.restrict (lookupNode rel) (Map.fromList (zip [offset..] bs))
                 Everything -> do
                   pure alwaysTrue
-          ddnode <- lift $ relToDDNode rhs
+          ddnode <- lift $ relToBDD rhs
           modify (Map.insert lhs ddnode)
 
   go statement

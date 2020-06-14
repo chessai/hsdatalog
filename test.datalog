@@ -5,10 +5,17 @@ ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 parent : Relation(Int, Int).
 neighbor : Relation(Int, Int).
 
-path : Relation(Int, Int).
-path(X, X).
-path(X, Y) :- neighbor(X, Y).
-path(X, Y) :- path(X, Z), path(Z, Y).
+parent(0, 1).
+parent(0, 2).
+parent(1, 3).
+parent(1, 4).
+parent(2, 5).
+parent(5, 6).
+
+//path : Relation(Int, Int).
+//path(X, X).
+//path(X, Y) :- neighbor(X, Y).
+//path(X, Y) :- path(X, Z), path(Z, Y).
 
 //bar(0,1).
 

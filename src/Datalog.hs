@@ -13,9 +13,10 @@ import Control.Monad.ST (ST, runST, stToIO)
 import Control.Monad.Trans.Writer.CPS (runWriterT)
 import Data.Foldable (foldl', foldlM)
 import Data.Map.Strict (Map)
+import Data.Text (Text)
 import Data.Tuple (swap)
 import Data.Void (Void)
-import Datalog.Cudd (CuddT, DDNode)
+import Datalog.Cudd (CuddT, SatBit)
 import Datalog.CycleEnumeration
 import Datalog.Elaboration
 import Datalog.Graph
@@ -25,7 +26,9 @@ import Datalog.RelAlgebra
 import Datalog.Stratification
 import Datalog.Syntax
 
+import qualified Data.List.Extra as Extra
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
 import qualified Datalog.Cudd as Cudd
 
 -- TODO (on the next episode):
@@ -58,7 +61,7 @@ main = do
   putStrLn (pretty relProgram)
   forM_ (Map.toList bdd) $ \(rel, sats) -> do
     forM_ sats $ \sat -> do
-      putStrLn $ pretty rel ++ "[" ++ concatMap pretty sat ++ "]"
+      putStrLn $ pretty rel ++ prettySatBit sat
 
 printProgram :: (Pretty rel, Pretty var) => Program rel var -> IO ()
 printProgram prog = do
@@ -67,6 +70,11 @@ printProgram prog = do
   putStrLn ""
   putStrLn "Types:"
   mapM_ (putStrLn . uncurry prettyType) (Map.toList (types prog))
+
+prettySatBit :: [SatBit] -> String
+prettySatBit sbs = id
+  $ concatMap (('[' :) . (++ "]") . concatMap pretty)
+  $ Extra.chunksOf 8 sbs
 
 doParse :: FilePath -> IO (Program Rel Name)
 doParse progFile = do

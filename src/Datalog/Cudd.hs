@@ -1,45 +1,167 @@
 {-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 
--- TODO: add state token to DDNode so they cannot escape my mouth after chewing
 module Datalog.Cudd
   ( module Datalog.Cudd
     -- * Re-exports
-  , DDManager
-  , DDNode
   , SatBit
   ) where
 
+import Control.Monad
 import Control.Monad.Reader (ReaderT, runReaderT)
 import Control.Monad.Reader.Class (MonadReader, reader)
+import Control.Monad.ST (ST, runST)
+import Control.Monad.State.Class (MonadState, get, modify, put, state)
+import Control.Monad.State.Strict (StateT, evalStateT)
 import Cudd.Cudd (DDManager, DDNode, SatBit)
 import Data.Foldable (foldlM)
 import Data.Functor.Identity (Identity (..))
 import Data.Map.Strict (Map)
+import Data.Set (Set)
+import Datalog.RelAlgebra (applyPermutation)
 import Prelude hiding (and, not, or)
 
 import qualified Cudd.Cudd as PureCudd
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import qualified Data.Vector as Vector
+import qualified Data.Vector.Mutable as MVector
 
-newtype CuddT m a = CuddT (ReaderT DDManager m a)
+-- KEEP YOUR MOUTH CLOSED WHEN YOU CHEW CUDD!
+data BDD = BDD
+  { bddNode :: !DDNode
+  , bddVars :: !(Set Int)
+  }
+  deriving stock (Eq)
+
+data Manager = Manager
+  { managerManager :: !DDManager
+  , managerNumVars :: !Int
+  }
+
+newtype CuddT m a = CuddT (StateT Manager m a)
   deriving newtype (Functor, Applicative, Monad)
-  deriving newtype (MonadReader DDManager)
+  deriving newtype (MonadState Manager)
 
 type Cudd = CuddT Identity
 
-chewWithT :: [Int] -> CuddT m a -> m a
-chewWithT order (CuddT cudd) = runReaderT cudd (PureCudd.cuddInitOrder order)
-
-chewT :: CuddT m a -> m a
-chewT (CuddT cudd) = runReaderT cudd PureCudd.cuddInit
+chewT :: (Monad m) => CuddT m a -> m a
+chewT (CuddT cudd) = evalStateT cudd (Manager PureCudd.cuddInit 0)
 
 chew :: Cudd a -> a
 chew = runIdentity . chewT
 
-chewWith :: [Int] -> Cudd a -> a
-chewWith order = runIdentity . chewWithT order
+bdd :: DDNode -> BDD
+bdd = flip BDD Set.empty
 
+true :: (Monad m) => CuddT m BDD
+true = bdd <$> state0 PureCudd.readOne
+
+false :: (Monad m) => CuddT m BDD
+false = bdd <$> state0 PureCudd.readLogicZero
+
+ithVar :: (Monad m) => Int -> CuddT m BDD
+ithVar i = do
+  numVars <- managerNumVars <$> get
+  modify (\m -> m { managerNumVars = max (i + 1) numVars })
+  bdd <$> state1 PureCudd.ithVar i
+
+and :: (Monad m) => BDD -> BDD -> CuddT m BDD
+and x y = do
+  ddnode <- state0 (\m -> PureCudd.bAnd m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+or :: (Monad m) => BDD -> BDD -> CuddT m BDD
+or x y = do
+  ddnode <- state0 (\m -> PureCudd.bOr m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+not :: (Monad m) => BDD -> CuddT m BDD
+not x = bdd <$> state0 (\m -> PureCudd.bNot m (bddNode x))
+
+nand :: (Monad m) => BDD -> BDD -> CuddT m BDD
+nand x y = do
+  ddnode <- state0 (\m -> PureCudd.bNand m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+nor :: (Monad m) => BDD -> BDD -> CuddT m BDD
+nor x y = do
+  ddnode <- state0 (\m -> PureCudd.bNor m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+xor :: (Monad m) => BDD -> BDD -> CuddT m BDD
+xor x y = do
+  ddnode <- state0 (\m -> PureCudd.bXor m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+xnor :: (Monad m) => BDD -> BDD -> CuddT m BDD
+xnor x y = do
+  ddnode <- state0 (\m -> PureCudd.bXnor m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.union` bddVars y))
+
+allSat :: (Monad m) => BDD -> CuddT m [[SatBit]]
+allSat = state1 PureCudd.allSat . bddNode
+
+exists :: (Monad m) => BDD -> BDD -> CuddT m BDD
+exists x y = do
+  ddnode <- state0 (\m -> PureCudd.bExists m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.difference` bddVars y))
+
+forall :: (Monad m) => BDD -> BDD -> CuddT m BDD
+forall x y = do
+  ddnode <- state0 (\m -> PureCudd.bForall m (bddNode x) (bddNode y))
+  pure (BDD ddnode (bddVars x `Set.difference` bddVars y))
+
+permuteManager :: (Monad m) => BDD -> [Int] -> CuddT m BDD
+permuteManager x y = bdd <$> state0 (\m -> PureCudd.permute m (bddNode x) y)
+
+permute :: (Monad m) => BDD -> [Int] -> CuddT m BDD
+permute node perm = do
+  numVars <- managerNumVars <$> get
+  let nodeVars = Set.toAscList (bddVars node)
+  let go :: forall s. ST s [Int]
+      go = do
+        arr <- Vector.thaw $ Vector.fromList [0 .. numVars - 1]
+        forM_ (zip nodeVars (applyPermutation perm nodeVars)) $ \(k,v) -> do
+          MVector.write arr k v
+        Vector.toList <$> Vector.unsafeFreeze arr
+  permuteManager node (runST go)
+
+restrictCube :: (Monad m) => BDD -> BDD -> CuddT m BDD
+restrictCube x y = bdd <$> state0 (\m -> PureCudd.restrict m (bddNode x) (bddNode y))
+
+restrict :: forall m. (Monad m) => BDD -> Map Int Bool -> CuddT m BDD
+restrict node m = do
+  trueNode <- true
+  d <- traverse (uncurry ith) (Map.toList m) >>= foldlM and trueNode
+  restrictCube node d
+  where
+    ith :: Int -> Bool -> CuddT m BDD
+    ith i b = if b
+      then ithVar i
+      else not =<< ithVar i
+
+state0 :: (MonadState Manager m)
+  => (DDManager -> a)
+  -> m a
+state0 f = state $ \s -> (f (managerManager s), s)
+
+state1 :: (MonadState Manager m)
+  => (DDManager -> x -> a)
+  -> x
+  -> m a
+state1 f x = state $ \s -> (f (managerManager s) x, s)
+
+state2 :: (MonadState Manager m)
+  => (DDManager -> x -> y -> a)
+  -> x
+  -> y
+  -> m a
+state2 f x y = state $ \s -> (f (managerManager s) x y, s)
+
+{-
 reader1 :: MonadReader r m => (r -> x -> a) -> x -> m a
 reader1 f x = reader (flip f x)
 
@@ -58,30 +180,6 @@ readOne = reader PureCudd.readOne
 readLogicZero :: (Monad m) => CuddT m DDNode
 readLogicZero = reader PureCudd.readLogicZero
 
-ithVar :: (Monad m) => Int -> CuddT m DDNode
-ithVar = reader1 PureCudd.ithVar
-
-and :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-and = reader2 PureCudd.bAnd
-
-or :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-or = reader2 PureCudd.bOr
-
-not :: (Monad m) => DDNode -> CuddT m DDNode
-not = reader1 PureCudd.bNot
-
-nand :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-nand = reader2 PureCudd.bNand
-
-nor :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-nor = reader2 PureCudd.bNor
-
-xor :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-xor = reader2 PureCudd.bXor
-
-xnor :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-xnor = reader2 PureCudd.bXnor
-
 eval :: (Monad m) => DDNode -> [Int] -> CuddT m Bool
 eval = reader2 PureCudd.eval
 
@@ -97,17 +195,8 @@ onePrime = reader2 PureCudd.onePrime
 supportIndex :: (Monad m) => DDNode -> CuddT m [Bool]
 supportIndex = reader1 PureCudd.supportIndex
 
-exists :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-exists = reader2 PureCudd.bExists
-
-forall :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-forall = reader2 PureCudd.bForall
-
 ifThenElse :: (Monad m) => DDNode -> DDNode -> DDNode -> CuddT m DDNode
 ifThenElse = reader3 PureCudd.bIte
-
-permute :: (Monad m) => DDNode -> [Int] -> CuddT m DDNode
-permute = reader2 PureCudd.permute
 
 swapVariables :: (Monad m) => DDNode -> [DDNode] -> [DDNode] -> CuddT m DDNode
 swapVariables = reader3 PureCudd.swapVariables
@@ -169,20 +258,6 @@ makePrime = reader2 PureCudd.makePrime
 constrain :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
 constrain = reader2 PureCudd.constrain
 
-restrict :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
-restrict = reader2 PureCudd.restrict
-
-restrict' :: forall m. (Monad m) => DDNode -> Map Int Bool -> CuddT m DDNode
-restrict' node m = do
-  trueNode <- readOne
-  d <- traverse (uncurry ith) (Map.toList m) >>= foldlM and trueNode
-  restrict node d
-  where
-    ith :: Int -> Bool -> CuddT m DDNode
-    ith i b = if b
-      then ithVar i
-      else not =<< ithVar i
-
 squeeze :: (Monad m) => DDNode -> DDNode -> CuddT m DDNode
 squeeze = reader2 PureCudd.squeeze
 
@@ -191,3 +266,4 @@ largestCube = reader1 PureCudd.largestCube
 
 lEq :: (Monad m) => DDNode -> DDNode -> CuddT m Bool
 lEq = reader2 PureCudd.lEq
+-}

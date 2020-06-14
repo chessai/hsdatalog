@@ -17,11 +17,26 @@ import Datalog.Syntax
 import GHC.Generics (Generic)
 import Numeric.Natural
 
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 
 type Attr = Int
 
 type AttrPermutation = [Attr]
+
+--------------------------------------------------------------------------------
+
+-- | Compute the permutation from one list to another, if one exists.
+--
+-- Laws:
+-- 1. If @Just p = computePermutation xs ys@, then @ys = applyPermutation p xs@.
+computePermutation :: Eq a => [a] -> [a] -> Maybe AttrPermutation
+computePermutation xs ys = mapM (\x -> List.elemIndex x ys) xs
+
+applyPermutation :: AttrPermutation -> [a] -> [a]
+applyPermutation perm xs = map (xs !!) perm
+
+--------------------------------------------------------------------------------
 
 data RelAlgebra rel
   = Not rel
